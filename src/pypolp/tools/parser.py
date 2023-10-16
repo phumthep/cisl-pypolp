@@ -166,7 +166,7 @@ def get_col_order(A_df, row_order, col_df) -> pd.DataFrame:
     return col_order
 
 
-def parse_dec(path, A_df, col_df) -> tuple[pd.DataFrame, pd.DataFrame]:
+def get_orders(path, A_df, col_df) -> tuple[pd.DataFrame, pd.DataFrame]:
     print('\nParsing the DEC file...')
     with open(path, 'r') as f:
         lines = f.readlines()
@@ -203,7 +203,7 @@ def parse_mps_dec(path_mps, path_dec) -> tuple[pd.DataFrame, ...]:
     """Return a tuple of five dataframes that define an instance"""
     
     c_df, A_df, b_df, ineq_df, col_df = parse_mps(path_mps)
-    row_order, col_order = parse_dec(path_dec, A_df, col_df)
+    row_order, col_order = get_orders(path_dec, A_df, col_df)
     
     # Permute the rows and columns of the dataframes
     # such that we can use row_indices and col_indices to subset
@@ -245,6 +245,66 @@ def parse_mps_dec(path_mps, path_dec) -> tuple[pd.DataFrame, ...]:
         col_indices = col_indices, 
         n_subproblems = n_subproblems,
         master_size = row_indices[0].start)
+
+
+def get_dataframe_orders(path_dec, A_df, col_df) -> tuple[pd.DataFrame, pd.DataFrame]:
+    print('\nParsing the DEC file...')
+    with open(path_dec, 'r') as f:
+        lines = f.readlines()
+    # A DEC file states the number of blocks in the line 
+    # after the NBLOCKS line
+    num_blocks = int(lines[lines.index('NBLOCKS\n')+1])
+    row_order = get_row_order(lines, num_blocks) 
+    col_order = get_col_order(A_df, row_order, col_df)
+    return row_order, col_order
+
+
+def parse_mps_with_orders(path_mps, row_order, col_order) -> DWProblem:
     
+    c_df, A_df, b_df, ineq_df, col_df = parse_mps(path_mps)
+    
+    # Permute the rows and columns of the dataframes
+    # such that we can use row_indices and col_indices to subset
+    # the dataframes according to blocks.
+    c_df = c_df.loc[col_order.index]
+    A_df = A_df.loc[row_order.index, col_order.index]
+    b_df = b_df.loc[row_order.index]
+    ineq_df = ineq_df.loc[row_order.index]
+    
+    col_df = col_df.loc[col_order.index]
+    
+    row_indices = get_indices(row_order)
+    col_indices = get_indices(col_order)
+    
+    # Find the number of subproblems or blocks
+    n_subproblems = len(col_indices)
+    
+    # If there are master-only variables, then we need to tag them
+    # by adding a special pair of indexes to row_indices and col_indices
+    # Master-only variables are permuted
+    # to the last section of the dataframes (think of the end columns of A_df)
+    last_var_idx_in_subp = col_indices[-1].end
+    num_total_vars = len(col_df)
+    
+    # There is a master-only variable, when the last block stops short from
+    # covering the rest of the variables.
+    if last_var_idx_in_subp != num_total_vars:
+        row_indices.append(Index(None, None))
+        col_indices.append(Index(last_var_idx_in_subp, num_total_vars))
+    
+    return DWProblem(
+        obj_coeffs = c_df, 
+        A = A_df, 
+        rhs = b_df, 
+        inequalities = ineq_df, 
+        var_info = col_df, 
+        row_indices = row_indices, 
+        col_indices = col_indices, 
+        n_subproblems = n_subproblems,
+        master_size = row_indices[0].start)
+
+
+
+
 
     
