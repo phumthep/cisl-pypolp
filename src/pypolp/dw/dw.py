@@ -1,6 +1,7 @@
 from collections import defaultdict
 import configparser
 
+from gurobipy import GRB
 import numpy as np
 import pandas as pd
 
@@ -84,14 +85,19 @@ class DantzigWolfe:
             duals = self.master_problem.get_duals()
             lambs = duals[:self.master_size].reshape(-1, 1)
             self.subproblems.update_solve(self.phase, dw_iter, lambs, record)
+        
 
-    
     
     def get_solution(self, record: Record) -> type[float, pd.DataFrame]:
         objval = None
 
         if self.phase == 2:
-            # Get X1 from the master problem
+            
+            # # We need to recover integer solutions
+            # self.master_problem.convert_betas_to_int()
+            # _ = self.master_problem.solve()
+            
+            # Get X from the master problem
             master_vars = self.master_problem.get_X()
             objval = self.master_problem.objval
             

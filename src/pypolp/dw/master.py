@@ -184,6 +184,18 @@ class MasterProblem(GurobipyOptimizer):
         return solution
     
     
+    def convert_betas_to_int(self) -> None:
+        '''
+        Change the beta variables to integer and re-optimize.
+        '''
+        master_vars = self.model.getVars()
+        # The names of beta variables are in the format B(block_id, dw_iter)
+        betas = [gp_var for gp_var in master_vars if gp_var.varname.startswith('B(')]
+        for v in betas:
+            v.setAttr('VType', GRB.INTEGER)
+        
+    
+    
     @classmethod
     def fit(cls, dw_problem: DWProblem) -> None:
         '''
