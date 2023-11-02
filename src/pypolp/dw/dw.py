@@ -17,7 +17,8 @@ class DantzigWolfe:
     def __init__(self):
         config: configparser.ConfigParser = get_config()
         self.MAXITER: int = int(config['DEFAULT']['MAXITER'])
-        self.DWTOL: float = float(config['DEFAULT']['DWTOL']) # in percentage
+        self.DWIMPROVE: float = float(config['DEFAULT']['DWIMPROVE']) # in percentage
+        self.DWOPTGAP: float = float(config['DEFAULT']['DWOPTGAP'])
         
         self.subproblems: Subproblems = None
         self.master_problem: MasterProblem = None
@@ -26,8 +27,6 @@ class DantzigWolfe:
         self.n_subproblems: int = None
 
         self.phase: int = 1
-        self.duals: np.array = None
-        self.primal_objvals = None
         
 
 
@@ -53,8 +52,9 @@ class DantzigWolfe:
         
     
     def solve(self, record: Record) -> None:
-        self.primal_objvals = []
         objval_old = np.inf
+        total_reduced_cost = -np.inf
+        dual_bound = -np.inf
         
         for dw_iter in range(1, self.MAXITER+1):
             # An iteration is counted when the master problem is optimize.
@@ -64,38 +64,69 @@ class DantzigWolfe:
             _ = self.master_problem.solve()
             
             # Update the parameters
-
             self.phase = self.master_problem.phase
+            duals = self.master_problem.get_duals()
+            lambs = duals[:self.master_size].reshape(-1, 1)
+            alphas = duals[self.master_size:]
 
             if self.phase == 2:
-                self.primal_objvals.append(self.master_problem.objval)
+                record.add_primal_objval(self.master_problem.objval)
+                
                 # Terminate if a condition is met
-                # 1) Check if the improvement is below a threshold
+                # 1) If the change in objval is below a threshold
                 objval_new = abs(self.master_problem.objval)
                 if objval_new == 0:
                     objval_new += 1e-6
                 percent_improve = abs((objval_new - objval_old)) / objval_new * 100
                 objval_old = objval_new
-            
-                if percent_improve <= self.DWTOL:
+                if percent_improve <= self.DWIMPROVE:
                     percent_improve = round(percent_improve, 3)
                     print(f'\nTerminate DW: Improvement is less than tolerance: {percent_improve} %')
                     break
-
-            duals = self.master_problem.get_duals()
-            lambs = duals[:self.master_size].reshape(-1, 1)
+                
+                # 2) If the lower bound improvement is less than threshold
+                reduced_costs = [ck - alpha_k for ck,alpha_k in zip(record.subproblem_objvals, alphas)]
+                # Only consider negative reduced costs when picking a variable to enter
+                reduced_costs = [rc for rc in reduced_costs if rc < 0]
+                new_total_reduced_cost = sum(reduced_costs)
+                
+                # If we do not get new extreme points/rays, then break
+                if total_reduced_cost != new_total_reduced_cost:
+                    total_reduced_cost = new_total_reduced_cost
+                else:
+                    break
+                
+                if dw_iter != 1:
+                    new_bound = objval_new + total_reduced_cost
+                    if new_bound > dual_bound:
+                        dual_bound = new_bound         
+                    
+                record.add_dual_bound(dual_bound)
+                optgap = abs(dual_bound - objval_new)/(1 + abs(dual_bound)) # Add 1 to prevent division by zero
+                print(f'DW Solve: Current reduced cost: {round(total_reduced_cost,4)}')
+                print(f'DW Solve: Optgap: {round(abs(total_reduced_cost/objval_new), 4)}')
+                # total_reduced_cost is zero at the first iteration
+                if (
+                        (optgap <= self.DWOPTGAP)
+                            and 
+                        (total_reduced_cost != 0)
+                        ):
+                    print(f'\nTerminate DW: Optgap is less than tolerance: {round(optgap*100, 4)} %')
+                # Reset the subproblem objvals at each iteration
+                record.reset_subproblem_objvals()
+                
+            if dw_iter == self.MAXITER:
+                print(f'\nTerminate DW: Reached max iteration: {self.MAXITER}')
             self.subproblems.update_solve(self.phase, dw_iter, lambs, record)
         
 
     
     def get_solution(self, record: Record) -> type[float, pd.DataFrame]:
-        objval = None
-
         if self.phase == 2:
             
-            # # We need to recover integer solutions
-            # self.master_problem.convert_betas_to_int()
-            # _ = self.master_problem.solve()
+            # We need to recover integer solutions
+            self.master_problem.convert_betas_to_int()
+            _ = self.master_problem.solve()
             
             # Get X from the master problem
             master_vars = self.master_problem.get_X()

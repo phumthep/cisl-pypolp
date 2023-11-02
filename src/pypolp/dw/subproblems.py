@@ -26,10 +26,15 @@ def convert_solution_to_proposal(
 
 class Subproblem(GurobipyOptimizer):
     def __init__(self, opt_problem: OptProblem, to_log: bool): 
+        self.block_id: int = None
+        
         model = get_model_from(opt_problem, to_log)
+        # The MIPGap is required to achieve good solution
+        config = get_config()
+        mipgap = float(config['DWSUBPROBLEM']['MIPGAP'])
+        model.setParam('MIPGap', mipgap)
         super().__init__(model)
         
-        self.block_id: int = None
         
         
     def set_id(self, block_id: int) -> None:
@@ -159,7 +164,9 @@ class Subproblems():
         for block_id, subproblem in enumerate(self.all_subproblems):
             subproblem.update_c(dw_phase, lambs)
             solution = subproblem.optimize()
-            #TODO: When doing analysis
+            record.add_subproblem_objval(solution.objval)
+            
+            #TODO: Record the stats only when in the analytical mode to save memory and computation
             self._record_opt_stats(block_id, subproblem.runtime, subproblem.itercount)
             
             proposal = convert_solution_to_proposal(

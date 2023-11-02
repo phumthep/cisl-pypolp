@@ -138,7 +138,7 @@ class MasterProblem(GurobipyOptimizer):
         # A ray may get scaled by the weight variable without an upperbound.
         if not proposal_pq.is_ray:
             self.model.addVar(
-                lb = 0, ub = 1,
+                lb = 0, #ub = 1,
                 obj = proposal_pq.P.iloc[0], 
                 vtype = GRB.CONTINUOUS, 
                 name = varname,
@@ -164,7 +164,7 @@ class MasterProblem(GurobipyOptimizer):
         
 
     def solve(self):
-        print('\nDW Solve: Master Problem\n')
+        # print('\nDW Solve: Master Problem\n')
         solution = self.optimize()
         
         # We did not initiate the class with an empty list of runtimes

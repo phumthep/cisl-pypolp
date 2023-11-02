@@ -57,6 +57,11 @@ class Record:
         self.col_indices: list[typing.NamedTuple[int, int]]
         self.varnames: list['str', ...]
         
+        # Save the reduced costs to calculate the lower bound of RMP
+        self.subproblem_objvals: list[float, ...] = None
+        self.dual_bounds: list[float, ...] = None
+        self.primal_objvals: list[float, ...] = None
+        
 
     def _update_proposals(self, proposal: Proposal) -> None:
         self.proposals[proposal.block_id].append(proposal)
@@ -104,6 +109,10 @@ class Record:
         # TODO: Modify this to Pool when do multiprocessing
         self.current_PQs = []
         
+        self.subproblem_objvals = []
+        self.dual_bounds = []
+        self.primal_objvals = []
+        
         self.cjs = []
         self.Ajs = []
         self.n_subproblems = dw_problem.n_subproblems
@@ -135,8 +144,21 @@ class Record:
             self._update_proposals(proposal)
             self._add_pq(proposal)
             
-        else:
-            pass
+        
+    def add_subproblem_objval(self, objval_j: float) -> None:
+        self.subproblem_objvals.append(objval_j)
+        
+        
+    def reset_subproblem_objvals(self) -> None:
+        self.subproblem_objvals = []
+        
+        
+    def add_primal_objval(self, objval_master: float) -> None:
+        self.primal_objvals.append(objval_master)
+        
+        
+    def add_dual_bound(self, dual_bound: float) -> None:
+        self.dual_bounds.append(dual_bound)
         
         
     def get_proposal(self, dw_iter:int, block_id:int) -> Proposal:
