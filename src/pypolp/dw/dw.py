@@ -1,7 +1,5 @@
-from collections import defaultdict
 import configparser
 
-from gurobipy import GRB
 import numpy as np
 import pandas as pd
 
@@ -19,6 +17,7 @@ class DantzigWolfe:
         self.MAXITER: int = int(config['DEFAULT']['MAXITER'])
         self.DWIMPROVE: float = float(config['DEFAULT']['DWIMPROVE']) # in percentage
         self.DWOPTGAP: float = float(config['DEFAULT']['DWOPTGAP'])
+        self.RECOVER_INTEGER: bool = config.getboolean('DEFAULT', 'RECOVER_INTEGER')
         
         self.subproblems: Subproblems = None
         self.master_problem: MasterProblem = None
@@ -125,8 +124,9 @@ class DantzigWolfe:
         if self.phase == 2:
             
             # We need to recover integer solutions
-            self.master_problem.convert_betas_to_int()
-            _ = self.master_problem.solve()
+            if self.RECOVER_INTEGER:
+                self.master_problem.convert_betas_to_int()
+                _ = self.master_problem.solve()
             
             # Get X from the master problem
             master_vars = self.master_problem.get_X()
