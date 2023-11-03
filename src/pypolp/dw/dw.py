@@ -86,31 +86,27 @@ class DantzigWolfe:
                 # 2) If the lower bound improvement is less than threshold
                 reduced_costs = [ck - alpha_k for ck,alpha_k in zip(record.subproblem_objvals, alphas)]
                 # Only consider negative reduced costs when picking a variable to enter
-                reduced_costs = [rc for rc in reduced_costs if rc < 0]
+                # reduced_costs = [rc for rc in reduced_costs if rc < 0]
                 new_total_reduced_cost = sum(reduced_costs)
                 
                 # If we do not get new extreme points/rays, then break
                 if total_reduced_cost != new_total_reduced_cost:
                     total_reduced_cost = new_total_reduced_cost
                 else:
+                    print('\nTerminate DW: No new proposal from subproblems')
                     break
                 
-                if dw_iter != 1:
-                    new_bound = objval_new + total_reduced_cost
-                    if new_bound > dual_bound:
-                        dual_bound = new_bound         
-                    
+                # dual_bound is zero at the first iteration
+                if dw_iter > 1:
+                    dual_bound = objval_new + total_reduced_cost
                 record.add_dual_bound(dual_bound)
+                
                 optgap = abs(dual_bound - objval_new)/(1 + abs(dual_bound)) # Add 1 to prevent division by zero
-                print(f'DW Solve: Current reduced cost: {round(total_reduced_cost,4)}')
-                print(f'DW Solve: Optgap: {round(abs(total_reduced_cost/objval_new), 4)}')
+                print(f'DW Solve: Optgap: {optgap}') #round(abs(total_reduced_cost/objval_new), 4)
                 # total_reduced_cost is zero at the first iteration
-                if (
-                        (optgap <= self.DWOPTGAP)
-                            and 
-                        (total_reduced_cost != 0)
-                        ):
+                if optgap <= self.DWOPTGAP:
                     print(f'\nTerminate DW: Optgap is less than tolerance: {round(optgap*100, 4)} %')
+                    break
                 # Reset the subproblem objvals at each iteration
                 record.reset_subproblem_objvals()
                 
@@ -154,7 +150,7 @@ class DantzigWolfe:
             
             # Weight each solution by its beta and then do group sum
             betas['weighted_X'] = betas['X'].multiply(betas['value'])
-            temp_x = betas.groupby('j').agg({'weighted_X': np.sum}).values.flatten()
+            temp_x = betas.groupby('j').agg({'weighted_X': 'sum'}).values.flatten()
         
             final_solution = []
             for j, x in enumerate(temp_x):
