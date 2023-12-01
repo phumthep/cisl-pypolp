@@ -53,7 +53,7 @@ def get_model_from(opt_problem: OptProblem, to_log: bool) -> gp.Model:
     
     # Identify and add the constraints
     model_constrs = model.addMConstr(
-        A.values, model_vars, inequalities['sign'].values, rhs.values)
+        A.values, model_vars, inequalities['sign'].values, rhs.values.reshape(-1))
 
     model_constrs.setAttr('constrname', A.index)
     model.update()
