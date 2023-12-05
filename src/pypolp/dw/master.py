@@ -46,7 +46,6 @@ def build_convex_rhs_ineq(dw_problem: DWProblem) -> tuple[pd.DataFrame, ...]:
     rhs_convex = pd.DataFrame(rhs_convex, index=convex_names, columns=['value'])
     # The sign of convexity constraints is the equality
     ineq_convex = pd.DataFrame(['E']*n_subproblems, index=convex_names, columns=['sign'])
-    
     return rhs_convex, ineq_convex
     
     
@@ -167,8 +166,7 @@ class MasterProblem(GurobipyOptimizer):
         # print('\nDW Solve: Master Problem\n')
         solution = self.optimize()
         
-        # We did not initiate the class with an empty list of runtimes
-        if self.runtimes is None:
+        if not self.runtimes:
             self.runtimes = []
             self.itercounts = []
         
@@ -198,7 +196,7 @@ class MasterProblem(GurobipyOptimizer):
     
     @classmethod
     def fit(cls, dw_problem: DWProblem) -> None:
-        '''
+        ''' Create a new instance of the new problem.
         '''
         config = get_config()
         debug = int(config['DWMASTER']['DEBUG'])

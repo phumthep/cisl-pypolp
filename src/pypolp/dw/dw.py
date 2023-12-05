@@ -12,12 +12,19 @@ from pypolp.tools.functions import get_config
 
 
 class DantzigWolfe:
-    def __init__(self):
+    def __init__(self, recover_integer=None):
         config: configparser.ConfigParser = get_config()
         self.MAXITER: int = int(config['DEFAULT']['MAXITER'])
         self.DWIMPROVE: float = float(config['DEFAULT']['DWIMPROVE']) # in percentage
         self.DWOPTGAP: float = float(config['DEFAULT']['DWOPTGAP'])
-        self.RECOVER_INTEGER: bool = config.getboolean('DEFAULT', 'RECOVER_INTEGER')
+
+        # The default is not to recover an integer solution
+        # We recover an integer solution by solving the last iteration of the master problem
+        # as a binary zero or one.
+        if not recover_integer:
+            self.RECOVER_INTEGER: bool = config.getboolean('DEFAULT', 'RECOVER_INTEGER')
+        else:
+            self.RECOVER_INTEGER: bool = recover_integer
         
         self.subproblems: Subproblems = None
         self.master_problem: MasterProblem = None
@@ -34,7 +41,6 @@ class DantzigWolfe:
         # Otherwise, the master is an empty model.
         self.master_size = dw_problem.master_size
         self.master_problem = MasterProblem.fit(dw_problem)
-        
         
         # We construct the master problem using proposals from the subproblems.
         # The master problem will collect proposals from subproblem as the first
@@ -68,12 +74,14 @@ class DantzigWolfe:
             lambs = duals[:self.master_size].reshape(-1, 1)
             alphas = duals[self.master_size:]
 
+            # Decide whether to terminate only when we are in Phase 2
             if self.phase == 2:
                 record.add_primal_objval(self.master_problem.objval)
                 
                 # Terminate if a condition is met
                 # 1) If the change in objval is below a threshold
                 objval_new = abs(self.master_problem.objval)
+                # Prevent division by zero
                 if objval_new == 0:
                     objval_new += 1e-6
                 percent_improve = abs((objval_new - objval_old)) / objval_new * 100
@@ -114,60 +122,60 @@ class DantzigWolfe:
                 print(f'\nTerminate DW: Reached max iteration: {self.MAXITER}')
             self.subproblems.update_solve(self.phase, dw_iter, lambs, record)
         
-
-    
-    def get_solution(self, record: Record) -> type[float, pd.DataFrame]:
-        if self.phase == 2:
-            
-            # We need to recover integer solutions
-            if self.RECOVER_INTEGER:
-                self.master_problem.convert_betas_to_int()
-                _ = self.master_problem.solve()
-            
-            # Get X from the master problem
-            master_vars = self.master_problem.get_X()
-            objval = self.master_problem.objval
-            
-            master_only_var_idx = ~master_vars['variable'].str.contains('B\(', regex=True)
-            if master_only_var_idx.sum() == 0:
-                master_only_vars = None
-            else:
-                master_only_vars = master_vars[master_only_var_idx]
-                master_only_vars = master_only_vars.set_index('variable')
-            
-            betas = master_vars[~master_only_var_idx].copy()
-        
-            # Label each row of beta with its subproblem_id and iteration_id
-            p = r'B\((?P<j>\d+),(?P<i>\d+)\)'
-            betas[['j', 'i']] = betas['variable'].str.extract(p)
-            betas = betas.astype({'j':int, 'i':int})
-        
-            # For each beta, extract the corresponding solution X from the record
-            betas['X'] = betas.apply(
-                lambda row: record.get_proposal(row['i'], row['j']).X,
-                axis = 1
-                )
-            
-            # Weight each solution by its beta and then do group sum
-            betas['weighted_X'] = betas['X'].multiply(betas['value'])
-            temp_x = betas.groupby('j').agg({'weighted_X': 'sum'}).values.flatten()
-        
-            final_solution = []
-            for j, x in enumerate(temp_x):
-                final_solution.extend(x)
-            
-            master_size = len(final_solution)
-            final_solution = pd.DataFrame(
-                final_solution, 
-                index = record.varnames[:master_size])
-            
-            final_solution.index = final_solution.index.rename('variable')
-            final_solution.columns = ['value']
-            
-            final_solution = pd.concat([final_solution, master_only_vars], axis=0)
-    
-        else:
+        # Produce an error if we have not reached Phase 2 after reaching the max iteration.
+        if not self.phase == 2:
             raise ValueError('DantzigWolfe has not entered phase II.')
+        
+    
+    def get_solution(
+            self, record: Record,
+            recover_integer: bool = False) -> type[float, pd.DataFrame]:
+        # We need to recover integer solutions
+        if self.RECOVER_INTEGER or recover_integer:
+            self.master_problem.convert_betas_to_int()
+            _ = self.master_problem.solve()
+        
+        # Get X from the master problem
+        master_vars = self.master_problem.get_X()
+        objval = self.master_problem.objval
+        
+        master_only_var_idx = ~master_vars['variable'].str.contains('B\(', regex=True)
+        if master_only_var_idx.sum() == 0:
+            master_only_vars = None
+        else:
+            master_only_vars = master_vars[master_only_var_idx]
+            master_only_vars = master_only_vars.set_index('variable')
+        
+        betas = master_vars[~master_only_var_idx].copy()
+    
+        # Label each row of beta with its subproblem_id and iteration_id
+        p = r'B\((?P<j>\d+),(?P<i>\d+)\)'
+        betas[['j', 'i']] = betas['variable'].str.extract(p)
+        betas = betas.astype({'j':int, 'i':int})
+    
+        # For each beta, extract the corresponding solution X from the record
+        betas['X'] = betas.apply(
+            lambda row: record.get_proposal(row['i'], row['j']).X,
+            axis = 1
+            )
+        
+        # Weight each solution by its beta and then do group sum
+        betas['weighted_X'] = betas['X'].multiply(betas['value'])
+        temp_x = betas.groupby('j').agg({'weighted_X': 'sum'}).values.flatten()
+    
+        final_solution = []
+        for j, x in enumerate(temp_x):
+            final_solution.extend(x)
+        
+        master_size = len(final_solution)
+        final_solution = pd.DataFrame(
+            final_solution, 
+            index = record.varnames[:master_size])
+        
+        final_solution.index = final_solution.index.rename('variable')
+        final_solution.columns = ['value']
+        
+        final_solution = pd.concat([final_solution, master_only_vars], axis=0)
             
         return objval, final_solution
     
