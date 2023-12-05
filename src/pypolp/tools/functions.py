@@ -24,7 +24,8 @@ def get_config() -> configparser.ConfigParser:
 def check_is_binary(
         model: gp.Model,
         target_varnames: list[str],
-        atol: float = 1e-5
+        atol: float = 1e-5,
+        return_non_binary = False
         ) -> bool:
     ''' Return true if target variables are binary.
     '''
@@ -52,5 +53,8 @@ def check_is_binary(
     non_int_vars = non_int_vars[non_int_vars['value'] < 1]
     num_non_int = len(non_int_vars)
     
-    return num_non_int == 0
+    if return_non_binary:
+        return (num_non_int == 0, non_int_vars)
+    else:
+        return num_non_int == 0
     
