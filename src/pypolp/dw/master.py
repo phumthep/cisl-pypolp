@@ -186,11 +186,9 @@ class MasterProblem(GurobipyOptimizer):
         '''
         Change the beta variables to integer and re-optimize.
         '''
-        master_vars = self.model.getVars()
-        # The names of beta variables are in the format B(block_id, dw_iter)
-        betas = [gp_var for gp_var in master_vars if gp_var.varname.startswith('B(')]
-        for v in betas:
-            v.setAttr('VType', GRB.INTEGER)
+        for gp_var in self.model.getVars():
+            if gp_var.varname.startswith('B('):
+                gp_var.setAttr('VType', GRB.INTEGER)
         
     
     
