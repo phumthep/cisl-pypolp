@@ -33,6 +33,7 @@ class DantzigWolfe:
         self.n_subproblems: int = None
 
         self.phase: int = 1
+        self.dw_iter: int = 0 # The number of DW iterations till termination
         
 
 
@@ -125,6 +126,9 @@ class DantzigWolfe:
         # Produce an error if we have not reached Phase 2 after reaching the max iteration.
         if not self.phase == 2:
             raise ValueError('DantzigWolfe has not entered phase II.')
+        
+        # Record the total iterations required
+        self.dw_iter = dw_iter
         
     
     def get_solution(
