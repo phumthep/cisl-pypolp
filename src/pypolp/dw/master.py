@@ -170,10 +170,14 @@ class MasterProblem(GurobipyOptimizer):
             self.runtimes = []
             self.itercounts = []
         
-        if self.model.status == 3:
+        if self.model.status == 3: # Infeasible
             self.phase = 1
-        else:
+        elif self.model.status == 2: # Optimal
             self.phase = 2
+        elif self.model.status == 9: # Hit time limit
+            pass
+        else:
+            raise RuntimeError(f'Gurobi terminated with status {self.model.status}')
             
         #TODO: Save only when doing analysis
         self.runtimes.append(self.runtime)

@@ -137,6 +137,9 @@ class DantzigWolfe:
         # We need to recover integer solutions
         if self.RECOVER_INTEGER or recover_integer:
             self.master_problem.convert_betas_to_int()
+            # Need to set time limit because some instances take forever
+            self.master_problem.model.setParam('TimeLimit', 60*5)
+            # self.master_problem.model.setParam('OutputFlag',1)
             _ = self.master_problem.solve()
         
         # Get X from the master problem

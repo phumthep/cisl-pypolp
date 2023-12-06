@@ -11,7 +11,7 @@ from pypolp.tools.parser import parse_mps, parse_mps_dec
 
 
 
-STATUS_MAP = {2: 'optimal', 3: 'infeasible', 5:'unbounded'}
+STATUS_MAP = {2: 'optimal', 3: 'infeasible', 5:'unbounded', 9:'time_limit'}
 
 CONFIG = get_config()
 gp.setParam('LPWarmStart', int(CONFIG['GUROBI']['WARMSTART']))
@@ -140,7 +140,12 @@ class GurobipyOptimizer:
                 objval = None, 
                 is_ray = True
                 )
-            
+        elif self.status == 'time_limit':
+            return Solution(
+                X = None,
+                objval = None,
+                is_ray = None
+                )
         else:
             raise RuntimeError(
                 '\nOptimization terminates with status ' + str(status))
