@@ -1,4 +1,3 @@
-import configparser
 import os
 
 import gurobipy as gp
@@ -6,19 +5,15 @@ import numpy as np
 import pandas as pd
 
 
-def get_root_dir() -> str:
+def get_pypolp_dir() -> str:
     return os.path.dirname(
         os.path.dirname(
             os.path.dirname(
-                os.path.dirname(
-                    os.path.realpath(__file__)))))
+                    os.path.realpath(__file__))))
 
 
-def get_config() -> configparser.ConfigParser:
-    config_file = os.path.join(get_root_dir(), 'user_config.ini')
-    config = configparser.ConfigParser()
-    config.read(config_file)
-    return config
+def get_temp_dir() -> str:
+    return os.path.join(get_pypolp_dir(), 'temp')
 
 
 def check_is_binary(
@@ -27,7 +22,8 @@ def check_is_binary(
         atol: float = 1e-5,
         return_non_binary = False
         ) -> bool:
-    ''' Return true if target variables are binary.
+    ''' Check if target variables are binary. Return non-binary
+    variables otherwise.
     '''
     variables = model.getVars()
     filtered_vars = {}

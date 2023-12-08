@@ -1,11 +1,16 @@
+from __future__ import annotations
 from collections import namedtuple
 import re
+from typing import TYPE_CHECKING
 
 import gurobipy as gp
 import pandas as pd
 import numpy as np
 
-from pypolp.problem_class import OptProblem, DWProblem
+
+
+if TYPE_CHECKING:
+    from pypolp.problem_class import DWProblem
 
 
 
@@ -17,41 +22,29 @@ Index = namedtuple('Index', ['start', 'end'])
 ##### Functions for mps file
 ######################################
 
-def parse_mps(path: str) -> tuple[pd.DataFrame, ...]:
+def parse_mps(path: str) -> tuple[pd.DataFrame]:
     print('\nParsing the MPS file...')
     model = gp.read(path)
     
-    # Loop through variables
-    varnames = []
-    lowerbounds = []
-    upperbounds = []
-    obj_coeffs = []
-    vtypes = []
-    for v in model.getVars():
-        varnames.append(v.varname)
-        lowerbounds.append(v.lb)
-        upperbounds.append(v.ub)
-        obj_coeffs.append(v.obj)
-        vtypes.append(v.vtype)
+    # Variable attributes
+    varnames = model.getAttr('varname')
+    lowerbounds = model.getAttr('lb')
+    upperbounds = model.getAttr('ub')
+    obj_coeffs = model.getAttr('obj')
+    vtypes = model.getAttr('vtype')
     
-    # Loop through constraints
-    b = []
-    ineq = []
-    constr_names = []
-    for constr in model.getConstrs():
-        b.append(constr.rhs)
-        ineq.append(constr.sense)
-        constr_names.append(constr.constrname)
-    
+    # Constraint attributes
+    b = model.getAttr('rhs')
+    ineq = model.getAttr('sense')
+    constr_names = model.getAttr('ConstrName')
     
     c_df = pd.DataFrame(obj_coeffs, index=varnames, columns=['value'])
     
-    A = model.getA()
-    A_df = pd.DataFrame(A.toarray(), index=constr_names, columns=varnames)
+    A_df = pd.DataFrame(model.getA().toarray(), index=constr_names, columns=varnames)
     
     b_df = pd.DataFrame(b, index=constr_names, columns=['value'])
     
-    inequalities = pd.DataFrame(ineq, index=constr_names, columns=['sign'])
+    inequalities = pd.DataFrame(ineq, index=constr_names, columns=['value'])
     
     col_df = pd.DataFrame(
         {'type':vtypes, 'lower':lowerbounds, 'upper':upperbounds},
@@ -77,7 +70,7 @@ def add_item(constr_dict, key, value) -> None:
         raise ValueError(f'The block number of {key} is not unique.')
 
 
-def parse_section(line) -> int:
+def parse_section(line: str) -> int:
     ''' Return the section ID if this line describes 
     the block number or the master section.
     '''
@@ -95,8 +88,9 @@ def get_row_order(lines: list[str, ...], num_blocks: int) -> pd.DataFrame:
     ''' Return a dataframe describing constr_name and block_id pairs.
     The rows are sorted in an ascending order by their block_ids.
     '''
-    # Set flag to true when we the current line is at 'BLOCK XX'
+    # Indicator variable of block_id of the current line 'BLOCK XX'
     flag = False
+    # Block 0 is the master problem.
     sections = ['BLOCK ' + str(i) for i in range(1, num_blocks+1)]
     sections.append('MASTERCONSS')
     
@@ -113,9 +107,8 @@ def get_row_order(lines: list[str, ...], num_blocks: int) -> pd.DataFrame:
         if flag:
             cur_section = parse_section(line)
             
-        # The current line might not belong to a block or the master
-        # if it is at the beginning of the DEC file.
-        # If a line belongs to 
+        # The beginning of a Dec file describes the problem and not the
+        # block memberships. Here, flag is still false.
         elif (cur_section is not None) and (not flag):
             add_item(constr_dict, line, cur_section)
         
@@ -148,7 +141,8 @@ def get_col_order(A_df, row_order, col_df) -> pd.DataFrame:
             (var_df[variable] != 0) & (var_df['block_id'] != 0))
         
         # There is an edge case where a variable does not belong to any block
-        # Here, that variable is pushed to the last box. Subproblem has no constraints
+        # Here, that variable is pushed to the last block 
+        # or a subproblem has no constraints
         if len(mask[0]) > 0:
             memberships = var_df.iloc[mask]['block_id'].unique()
             # Check that this variable is not a linking variable
@@ -167,6 +161,9 @@ def get_col_order(A_df, row_order, col_df) -> pd.DataFrame:
 
 
 def get_orders(path, A_df, col_df) -> tuple[pd.DataFrame, pd.DataFrame]:
+    ''' Return row order and column order of the A matrix.
+    This is an ascending order.
+    '''
     print('\nParsing the DEC file...')
     with open(path, 'r') as f:
         lines = f.readlines()
@@ -199,7 +196,7 @@ def get_indices(order_df) -> list[Index[int, int]]:
     return indices
 
 
-def parse_mps_dec(path_mps, path_dec) -> tuple[pd.DataFrame, ...]:
+def parse_mps_dec(path_mps, path_dec) -> tuple[pd.DataFrame]:
     """Return a tuple of five dataframes that define an instance"""
     
     c_df, A_df, b_df, ineq_df, col_df = parse_mps(path_mps)
@@ -233,7 +230,6 @@ def parse_mps_dec(path_mps, path_dec) -> tuple[pd.DataFrame, ...]:
     if last_var_idx_in_subp != num_total_vars:
         row_indices.append(Index(None, None))
         col_indices.append(Index(last_var_idx_in_subp, num_total_vars))
-        
 
     return DWProblem(
         obj_coeffs = c_df, 
@@ -260,7 +256,8 @@ def get_dataframe_orders(path_dec, A_df, col_df) -> tuple[pd.DataFrame, pd.DataF
 
 
 def parse_mps_with_orders(path_mps, row_order, col_order) -> DWProblem:
-    
+    ''' Return a DWProblem instance.
+    '''
     c_df, A_df, b_df, ineq_df, col_df = parse_mps(path_mps)
     
     # Permute the rows and columns of the dataframes
