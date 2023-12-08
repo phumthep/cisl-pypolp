@@ -1,175 +1,91 @@
+from __future__ import annotations
+
 from gurobipy import GRB
 import gurobipy as gp
 import pandas as pd
 
-from pypolp.dw.record import Record, ProposalPQ
-from pypolp.optim import OptProblem, DWProblem, GurobipyOptimizer, get_model_from
-from pypolp.tools.functions import get_config
+from pypolp.config import (
+    get_master_timelimit,
+    get_master_verbose,
+    get_master_mipgap
+    )
+from pypolp.dw.record import ProposalPQ
+from pypolp.functions import generate_convex_names
+from pypolp.optim import GurobipyOptimizer, Solution
+from pypolp.problem_class import DWProblem
 
-
-
-def has_master_only_vars(row_indices) -> bool:
-    ''' If there is a master-only variable, then the final member of
-    row_indices is (None, None)
-    '''
-    return (row_indices[-1].start is None)
-
-
-def get_num_blocks(row_indices) -> int:
-    if has_master_only_vars(row_indices):
-        # The final member is just a placeholder for master-only variables.
-        return len(row_indices) - 1
-    else:
-        return len(row_indices)
-
-
-def separate_master_vars(master_vars: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
-    master_only_vars = master_vars[~master_vars['variable'].str.contains('B\(', regex=True)]
-    master_only_vars = master_only_vars.set_index('variable')
-    betas = master_vars[master_vars['variable'].str.contains('B\(', regex=True)].copy()
-    return master_only_vars, betas
-
-
-def generate_convex_names(n_subproblems: int):
-    ''' The name of convexity contrainsts are in the format convex_[block_id].
-    We recover the final solution using this regex pattern.
-    '''
-    convex_names = [f'convex_{j}' for j in range(n_subproblems)]
-    return convex_names
-
-
-def build_convex_rhs_ineq(dw_problem: DWProblem) -> tuple[pd.DataFrame, ...]:
-    n_subproblems = dw_problem.n_subproblems
-    convex_names = generate_convex_names(n_subproblems)
-    # The RHS of convexity constraints is 1
-    rhs_convex = [1 for _ in range(dw_problem.n_subproblems)]
-    rhs_convex = pd.DataFrame(rhs_convex, index=convex_names, columns=['value'])
-    # The sign of convexity constraints is the equality
-    ineq_convex = pd.DataFrame(['E']*n_subproblems, index=convex_names, columns=['sign'])
-    return rhs_convex, ineq_convex
-    
-    
-
-def create_empty_model(dw_problem: DWProblem, to_log: bool) -> gp.Model:
-    ''' Create an empty Gurobi model from a list of constraint names
-    '''
-    master_size = dw_problem.master_size
-    n_subproblems = dw_problem.n_subproblems
-
-    constr_names = list(dw_problem.A.index[:dw_problem.master_size])
-    convex_names = generate_convex_names(n_subproblems)
-    constr_names = constr_names + convex_names
-
-    rhs_convex, ineq_convex = build_convex_rhs_ineq(dw_problem)
-
-    rhs_master = dw_problem.rhs[:master_size]
-    rhs_master = pd.concat([rhs_master, rhs_convex], axis=0)
-
-    ineq_master = pd.concat(
-        [dw_problem.inequalities[:master_size], ineq_convex],
-        axis = 0)
-    
-    model = gp.Model()
-    model.setParam('outputflag', to_log)
-    for idx, constr_name in enumerate(constr_names):
-        model.addConstr(0 == 0, name=constr_name)
-    model.update()
-    
-    for idx, constr in enumerate(model.getConstrs()):
-        constr
-        constr.setAttr("RHS", rhs_master.value[idx])
-        constr.setAttr("Sense", ineq_master.sign[idx])
-    model.update()
-    model.display()
-    
-    return model
 
 
 class MasterProblem(GurobipyOptimizer):
-    def __init__(self, model):
-        super().__init__(model)
-        self.objval: float = None
+    def __init__(
+            self,
+            model: gp.Model,
+            mipgap: float,
+            timelimit: int,
+            verbose: bool,
+            ):
+        # Inherit methods from GurobipyOptimizer class
+        super().__init__(
+            model = model,
+            warmstart = True,
+            mipgap = mipgap,
+            verbose = verbose,
+            to_record = True
+            )
+        if not timelimit:
+            self.model.setParam('timelimit', get_master_timelimit())
+        else:
+            self.model.setParam('timelimit', timelimit)
+        # Other add-on attributes from GurobipyOptimizers
+        self.has_mov: bool = None
         self.phase: int = None
-        
-        self.runtimes: list[float] = None
-        self.itercounts: list[int] = None
-    
-    @staticmethod
-    def _get_opt_problem(dw_problem: DWProblem) -> OptProblem:
-        ''' In case there are master-ony variables, put those variables
-        in the master problem in their original form. Also, need to add
-        the convexity constraints.
-        '''
-        col_id = dw_problem.col_indices[-1]
-        
-        obj_coeffs = dw_problem.obj_coeffs.iloc[col_id.start:]
-        A = dw_problem.A.iloc[:dw_problem.master_size, col_id.start:]
-        rhs = dw_problem.rhs.iloc[:dw_problem.master_size]
-        inequalities = dw_problem.inequalities.iloc[:dw_problem.master_size]
-        var_info = dw_problem.var_info.iloc[col_id.start:]
-        
-        # Create the section for convexity constraints
-        convex_names = generate_convex_names(dw_problem.n_subproblems)
-        
-        A_convex = pd.DataFrame(0, index=convex_names, columns=A.columns)
-        rhs_convex, ineq_convex = build_convex_rhs_ineq(dw_problem)
-        
-        A = pd.concat([A, A_convex], axis=0)
-        
-        rhs = pd.concat([rhs, rhs_convex], axis=0)
-    
-        inequalities = pd.concat([inequalities, ineq_convex], axis = 0)
-        
-        opt_problem = OptProblem(
-            obj_coeffs, A, rhs, inequalities, var_info)
-        return opt_problem
+        self.runtimes: list[float, ...] = None
+        self.itercounts: list[int, ...] = None
     
     
     def _add_col(self, proposal_pq: ProposalPQ) -> None:
-        varname = f'B({proposal_pq.block_id},{proposal_pq.dw_iter})'
-        
+        ''' Add a new column from a proposal. P is a scalar of the objective coefficient.
+        Q is a vector of coefficients in the A matrix.
+        '''
         if not (len(proposal_pq.Q) == self.model.getAttr('numconstrs')):
             raise ValueError(
                 'The shape of Q does not match the number of constraints in the master problem.')
         
-        constrs = self.model.getConstrs()
-        
+        varname = f'B({proposal_pq.block_id},{proposal_pq.dw_iter})'
         # A ray may get scaled by the weight variable without an upperbound.
         if not proposal_pq.is_ray:
             self.model.addVar(
-                lb = 0, #ub = 1,
+                lb = 0, 
                 obj = proposal_pq.P.iloc[0], 
                 vtype = GRB.CONTINUOUS, 
                 name = varname,
-                column = gp.Column(proposal_pq.Q, constrs)
+                column = gp.Column(proposal_pq.Q, self.model.getConstrs())
                 )
         else:
+            # Defining 1 as the upper bound will mess up the dual variables
             self.model.addVar(
                 lb = 0,
                 obj = proposal_pq.P, 
                 vtype = GRB.CONTINUOUS, 
                 name = varname,
-                column = gp.Column(proposal_pq.Q, constrs)
+                column = gp.Column(proposal_pq.Q, self.model.getConstrs())
                 )
         
         
-    def add_cols_from(self, record: Record) -> None:
+    def add_cols_from(self, current_PQs: list[ProposalPQ, ...]) -> None:
         ''' Add new columns using extreme points/rays from the subproblems.
         '''
-        while record.current_PQs:
-            proposal_pq = record.current_PQs.pop()
+        while current_PQs:
+            proposal_pq = current_PQs.pop()
             self._add_col(proposal_pq)
         self.model.update()
         
 
-    def solve(self):
-        # print('\nDW Solve: Master Problem\n')
+    def solve(self) -> Solution:
+        if self.verbose:
+            print('\nDW Solve: Master Problem\n')
         solution = self.optimize()
-        
-        if not self.runtimes:
-            self.runtimes = []
-            self.itercounts = []
-        
+
         if self.model.status == 3: # Infeasible
             self.phase = 1
         elif self.model.status == 2: # Optimal
@@ -178,42 +94,124 @@ class MasterProblem(GurobipyOptimizer):
             pass
         else:
             raise RuntimeError(f'Gurobi terminated with status {self.model.status}')
-            
-        #TODO: Save only when doing analysis
-        self.runtimes.append(self.runtime)
-        self.itercounts.append(self.itercount)
+        
+        # GurobiOptimizer has the record attribute
+        if self.to_record:
+            if not self.runtimes:
+                self.runtimes = [self.runtime]
+                self.itercounts = [self.itercount]
+            else:
+                self.runtimes.append(self.runtime)
+                self.itercounts.append(self.itercount)
         
         return solution
     
     
     def convert_betas_to_int(self) -> None:
-        '''
-        Change the beta variables to integer and re-optimize.
+        ''' Change the beta variables to integer and re-optimize.
         '''
         for gp_var in self.model.getVars():
             if gp_var.varname.startswith('B('):
                 gp_var.setAttr('VType', GRB.INTEGER)
+                
+    
+    @staticmethod
+    def _get_rhs_inequality_dataframes(dw_problem: DWProblem) -> tuple[pd.DataFrame]:
+        ''' Return two dataframes to define the convexity constraints:
+            b-vector (or right-hand side) and the inequality signs.
+        '''
+        convex_names: list[str, ...] = generate_convex_names(dw_problem.n_subproblems)
+        # The RHS of convexity constraints is 1
+        rhs_convex = pd.DataFrame(
+            [1 for _ in range(dw_problem.n_subproblems)],
+            index = convex_names,
+            columns = ['value']
+            )
+        # The sign of convexity constraints is the equality
+        ineq_convex = pd.DataFrame(['E']*dw_problem.n_subproblems, index=convex_names, columns=['value'])
         
+        rhs = pd.concat(
+            [dw_problem.rhs[:dw_problem.master_size], rhs_convex],
+            axis = 0
+            )
+        inequality = pd.concat(
+            [dw_problem.inequalities[:dw_problem.master_size], ineq_convex],
+            axis = 0
+            )
+        return rhs, inequality
     
     
     @classmethod
-    def fit(cls, dw_problem: DWProblem) -> None:
-        ''' Create a new instance of the new problem.
+    def _get_master_model(cls, dw_problem: DWProblem) -> gp.Model:
+        ''' The master model contains blank objective function and blank A matrix.
+        Although the constraints are originally empty, we will add new columns to them.
+        Here, we need placeholders for the original constraints and the convexity constraints.
+        Note that we must define the  signs and the RHS for these placeholders.
         '''
-        config = get_config()
-        debug = int(config['DWMASTER']['DEBUG'])
+        rhs, inequality = cls._get_rhs_inequality_dataframes(dw_problem)
         
-        has_mov = has_master_only_vars(dw_problem.row_indices)
-        
-        if not has_mov:
-            model = create_empty_model(dw_problem, to_log=debug)
-            model.setParam('outputflag', debug)
-        else:
-            opt_problem = cls._get_opt_problem(dw_problem)
-            model = get_model_from(opt_problem, to_log=debug)
-        
-        return cls(model)
+        model = gp.Model()
+        model.addConstrs(0==0 for _ in range(dw_problem.n_subproblems))
+        model.setAttr('rhs', model.getConstrs(), rhs)
+        model.setAttr('sense', model.getConstrs(), inequality)
+        model.setAttr('constrname', model.getConstrs(), rhs.index)
+        model.update()
+        return model
     
-
-
+    
+    @classmethod
+    def _get_master_model_with_mov(cls, dw_problem: DWProblem) -> gp.Model:
+        ''' Create a model of the master problem given master-only variables.
+        The objective function and the constraint matrix contain master-only variables.
+        Note that we also have the convexity constraints.
+        '''
+        
+        # The master-only variables are specified by the last component of col_indices
+        col_id = dw_problem.col_indices[-1]
+        
+        obj_coeffs = dw_problem.obj_coeffs.iloc[col_id.start:]
+        A = dw_problem.A.iloc[:dw_problem.master_size, col_id.start:]
+        var_info = dw_problem.var_info.iloc[col_id.start:]
+        
+        # Create the section for convexity constraints
+        rhs, inequality = cls._get_rhs_inequality_dataframes(dw_problem)
+        
+        A_convex = pd.DataFrame(
+            0,
+            index = generate_convex_names(dw_problem.n_subproblems),
+            columns = A.columns
+            )
+        A = pd.concat(
+            [A, A_convex],
+            axis=0
+            )
+        return cls._get_gp_model_from_dataframes(
+            obj_coeffs = obj_coeffs,
+            A = A,
+            rhs = rhs,
+            inequalities = inequality,
+            var_info = var_info
+            )
+    
+    
+    @classmethod
+    def fit(
+            cls,
+            dw_problem: DWProblem,
+            timelimit: int = None
+            ) -> MasterProblem:
+        # When there are no master-only variables, the master problem is empty
+        # but with placeholder for constraints.
+        has_mov = dw_problem.check_has_check_master_only_vars()
+        if not has_mov:
+            model: gp.Model = cls._get_master_model(dw_problem=dw_problem)
+        else:
+            model: gp.Model = cls._get_master_model_with_mov(dw_problem=dw_problem)
+        
+        return cls(
+            model = model,
+            mipgap = get_master_mipgap(),
+            timelimit = timelimit,
+            verbose = get_master_verbose(),
+            )
 
