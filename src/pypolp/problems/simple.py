@@ -26,7 +26,7 @@ def problem_01(to_dw: bool) -> OptProblem:
     
     b_df = pd.DataFrame({'value': [15, -3, 5, 10]}, index=constr_names)
     
-    ineq_df = pd.DataFrame({'sign': ['<', '>', '<', '=']}, index=constr_names)
+    ineq_df = pd.DataFrame({'value': ['<', '>', '<', '=']}, index=constr_names)
     
     col_df = pd.DataFrame(
         {
@@ -66,7 +66,7 @@ def problem_02():
     
     b_df = pd.DataFrame([10, 12, 24], index=row_names, columns=['value'])
     
-    ineq_df = pd.DataFrame(['<']*3, index=row_names, columns=['sign'])
+    ineq_df = pd.DataFrame(['<']*3, index=row_names, columns=['value'])
     col_df = pd.DataFrame({
         'type': ['Continuous'] * 4,
         'lower': [0] * 4,
@@ -102,7 +102,7 @@ def unbounded_problem():
     
     b_df = pd.DataFrame([10, 12, 24], index=row_names, columns=['value'])
     
-    ineq_df = pd.DataFrame(['<']*3, index=row_names, columns=['sign'])
+    ineq_df = pd.DataFrame(['<']*3, index=row_names, columns=['value'])
     col_df = pd.DataFrame({
         'type': ['Continuous'] * 5,
         'lower': [0] * 5,
@@ -137,7 +137,7 @@ def infeasible_problem():
     
     b_df = pd.DataFrame([6, 8, 0], index=row_names, columns=['value'])
     
-    ineq_df = pd.DataFrame(['=']*3, index=row_names, columns=['sign'])
+    ineq_df = pd.DataFrame(['=']*3, index=row_names, columns=['value'])
     
     col_df = pd.DataFrame({
         'type': ['Continuous'] * 3,
