@@ -1,6 +1,6 @@
 from pypolp.dw.dw import DantzigWolfe
 from pypolp.optim import GurobipyOptimizer
-from pypolp.dw.record import Record
+from pypolp.dw.record import DWRecord
 from pypolp.problems.dantzig_wolfe import problem_02 as problem
 
 
@@ -9,7 +9,7 @@ def main():
     opt_problem, dw_problem = problem()
     
     #------- Optimize with Dantzig-Wolfe
-    record = Record()
+    record = DWRecord()
     record.fit(dw_problem)
     
     dw_instance = DantzigWolfe()
@@ -24,13 +24,15 @@ def main():
     true_solution = base_opt.optimize()
     
     print('\n============================================')
-    print('\n=== Completed solving with Dantzig-Wolfe ===')
-    print(f'Opt time - Master Problem:   {round(master_time, 5)} s')
-    print(f'Opt time - Subproblem:       {round(subproblem_time, 5)} s')
-    print(f'Opt time - DW Total:          {round(master_time+subproblem_time, 5)} s')
-    print(f'Opt time - Base Gurobi:      {round(base_opt.runtime, 5)} s')
-    print(f'\nObj Val - DW:             {round(dw_objval, 2)} s')
-    print(f'Obj Val - Base Gurobi:    {round(true_solution.objval, 2)} s')
+    print(f'\n{"":<10} {"Completed Dantzig-Wolfe":^10}')
+    print('\nOptimization time')
+    print(f'{"Master Problem:":<20} {round(master_time, 3)} s')
+    print(f'{"Subproblem:":<20} {round(subproblem_time, 3)} s')
+    print(f'{"DW Total:":<20} {round(master_time+subproblem_time, 3)} s')
+    print(f'{"Base Gurobi:":<20} {round(base_opt.runtime, 3)} s')
+    print('\nObjective Value')
+    print(f'{"DW:":<20} {round(dw_objval, 2)} s')
+    print(f'{"Gurobi:":<20} {round(true_solution.objval, 2)} s')
     print('\n============================================')
 
 
