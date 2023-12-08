@@ -1,3 +1,4 @@
+from __future__ import annotations
 from dataclasses import dataclass
 
 import gurobipy as gp
@@ -5,59 +6,13 @@ from gurobipy import GRB
 import numpy as np
 import pandas as pd
 
-from pypolp.problem_class import OptProblem, DWProblem
-from pypolp.tools.functions import get_config
-from pypolp.tools.parser import parse_mps, parse_mps_dec
-
-
-
-STATUS_MAP = {2: 'optimal', 3: 'infeasible', 5:'unbounded', 9:'time_limit'}
-
-CONFIG = get_config()
-gp.setParam('LPWarmStart', int(CONFIG['GUROBI']['WARMSTART']))
-
-# Required to get Farkas ray
-gp.setParam('infunbdinfo', 1)
-gp.setParam('MIPGap', 0)
-
-
-
-#----- Classes
-def get_model_from(opt_problem: OptProblem, to_log: bool) -> gp.Model:
-    
-    # Extract parameters required to set-up a Gurobi model
-    (
-        obj_coeffs,
-        A,
-        rhs,
-        inequalities,
-        var_info
-        ) = opt_problem.get_dataframes()
-    
-    model = gp.Model()
-    model.setParam('outputflag', to_log)
-    
-    # Define variables
-    model_vars = model.addMVar(
-        shape = var_info.shape[0], 
-        name = var_info.index)
-    
-    model_vars.setAttr('lb', var_info.lower.values)
-    model_vars.setAttr('ub', var_info.upper.values)
-    model_vars.setAttr('vtype', var_info.type.values)
-    
-    # Define the objective value
-    model.setObjective(
-        expr = obj_coeffs.values.T @ model_vars,
-        sense = GRB.MINIMIZE)
-    
-    # Identify and add the constraints
-    model_constrs = model.addMConstr(
-        A.values, model_vars, inequalities['sign'].values, rhs.values.reshape(-1))
-
-    model_constrs.setAttr('constrname', A.index)
-    model.update()
-    return model
+from pypolp.config import (
+    get_gp_warmstart,
+    get_gp_mipgap,
+    get_gp_record,
+    get_gp_verbose,
+    )
+from pypolp.problem_class import OptProblem
 
 
 
@@ -79,7 +34,7 @@ class Solution:
 
 @dataclass(slots=True)
 class Proposal(Solution):
-    ''' Similar to Solution but has a name or ID.
+    ''' A Solution class with information on block_id and the DW iteration.
     '''
     dw_iter: int
     block_id: int
@@ -89,18 +44,65 @@ class Proposal(Solution):
             (self.X == other.X).all()
             and (self.is_ray == other.is_ray)
             )
+    
+    @classmethod
+    def from_solution(
+            cls,
+            solution: Solution, 
+            dw_iter: int, 
+            block_id: int
+            )-> Proposal:
+        return Proposal(
+            X = solution.X,
+            objval = solution.objval,
+            is_ray = solution.is_ray,
+            dw_iter = dw_iter,
+            block_id = block_id)
 
 
 class GurobipyOptimizer:
-    ''' Class that acts as a wrapper around Gurobipy model.
+    ''' Class that wraps around gurobipy model.
     '''
-    def __init__(self, model):
+    def __init__(
+            self,
+            model: gp.Model,
+            warmstart: bool,
+            mipgap: float,
+            verbose: bool,
+            to_record: bool,
+            ):
+        self.status_map = {2: 'optimal', 3: 'infeasible', 5:'unbounded', 9:'time_limit'}
         self.model: gp.Model = model
+        
+        # Default to Gurobi parameters in user_config.ini
+        if not warmstart:
+            self.model.setParam('LPWarmStart', get_gp_warmstart())
+        else:
+            self.model.setParam('LPWarmStart', warmstart)
+            
+        if not mipgap:
+            self.model.setParam('mipgap', get_gp_mipgap())
+        else:
+            self.model.setParam('mipgap', mipgap)
+        
+        if not verbose:
+            self.model.setParam('outputflag', get_gp_verbose())
+        else:
+            self.model.setParam('outputflag', verbose)
+            
+        # If want to record gurobi statistics
+        if not to_record:
+            self.to_record = get_gp_record()
+        else:
+            self.to_record = to_record
+            
+        # Need to compute additional information when a model is 
+        # infeasible to get the Farkas ray
+        self.model.setParam('infunbdinfo', 1)
+        
         self.status: str = None
         self.farkas_duals: np.array = None
-        
-        self.to_log: bool = None
-        
+
         self.objval: float = None
         self.runtime: float = None # in seconds
         self.itercount: int = None
@@ -111,16 +113,18 @@ class GurobipyOptimizer:
         
 
     def optimize(self) -> Solution:
-        
         self.model.optimize()
-        self.objval = self.model.objval
-        #TODO: Save only when doing analysis
-        self.runtime = self.model.runtime
-        self.itercount = int(self.model.itercount)
         
-        status = self.model.Status
-        self.status = STATUS_MAP.get(status)
+        # Store the Gurobi status code
+        status: int = self.model.Status
         
+        self.status = self.status_map.get(status)
+
+        if self.to_record:
+            self.objval = self.model.objval
+            self.runtime = self.model.runtime
+            self.itercount = int(self.model.itercount)
+
         
         if self.status == 'optimal':
             return Solution(
@@ -128,11 +132,9 @@ class GurobipyOptimizer:
                 objval = self.model.objval, 
                 is_ray = False
                 )
-            
         elif self.status == 'infeasible':
             self.farkas_duals = np.array(self.model.farkasdual)
             return None
-    
         elif self.status == 'unbounded':
             # Returns an extreme ray
             return Solution(
@@ -153,44 +155,95 @@ class GurobipyOptimizer:
 
     def get_duals(self) -> np.array:
         if self.status == 'optimal':
-            duals = [constr.pi for constr in self.model.getConstrs()]
+            duals = np.array([constr.pi for constr in self.model.getConstrs()])
         else:
             duals = self.farkas_duals
-        return np.array(duals)
+        return duals
     
     
     def get_X(self) -> pd.DataFrame:
-        var_names = self.model.getAttr("varname")
-        var_vals = self.model.getAttr("x")
-        return pd.DataFrame({'variable':var_names, 'value':var_vals})
+        return pd.DataFrame(
+            {
+                'variable': self.model.getAttr('varname'),
+                'value': self.model.getAttr('X')}
+            )
 
 
     @classmethod
     def create(
             cls,
-            opt_problem: OptProblem, 
-            to_log: bool
-            ) -> 'GurobipyOptimizer':
-        model = get_model_from(opt_problem, to_log)
-        return cls(model)
+            opt_problem: OptProblem,
+            warmstart: bool = None,
+            mipgap: float = None,
+            verbose: bool = None,
+            to_record: bool = None
+            ) -> GurobipyOptimizer:
+        return cls(
+            model = cls._get_gp_model_from_opt_problem(opt_problem),
+            warmstart = warmstart,
+            mipgap = mipgap,
+            verbose = verbose,
+            to_record = to_record
+            )
     
     
     @classmethod
-    def from_file(cls, filename: str, to_log: bool) -> 'GurobipyOptimizer':
-        ''' Directly create a GurobipyOptimizer from a file instead of
-        getting them from dataframes.
+    def from_file(
+            cls, 
+            filename: str, 
+            warmstart: bool = None,
+            mipgap: float = None,
+            verbose: bool = None,
+            to_record: bool = None
+            ) -> GurobipyOptimizer:
+        ''' Create a GurobipyOptimizer from a file instead of
+        getting from dataframes.
         '''
-        model = gp.read(filename)
-        model.setParam('outputflag', to_log)
-        return cls(model)
+        return cls(
+            model = gp.read(filename),
+            warmstart = warmstart,
+            mipgap = mipgap,
+            verbose = verbose,
+            to_record = to_record
+            )
     
-    
-    
-    
-#----- Supporting functions
-def create_opt_problem(mps_file: str) -> OptProblem:
-    return OptProblem.from_dataframes(*parse_mps(mps_file))
 
-
-def create_dw_problem(mps_file: str, dec_file: str) -> DWProblem:
-    return DWProblem.from_tuple(*parse_mps_dec(mps_file, dec_file))
+    @staticmethod
+    def _get_gp_model_from_dataframes(
+            obj_coeffs: pd.DataFrame,
+            A: pd.DataFrame,
+            rhs: pd.DataFrame,
+            inequalities: pd.DataFrame,
+            var_info: pd.DataFrame
+            ) -> gp.Model:
+        ''' Create a gurobipy model from a set of five dataframes.
+        '''
+        model = gp.Model()
+        # Define variables
+        model_vars = model.addMVar(
+            shape = var_info.shape[0], 
+            name = var_info.index
+            )
+        model_vars.setAttr('lb', var_info.lower.values)
+        model_vars.setAttr('ub', var_info.upper.values)
+        model_vars.setAttr('vtype', var_info.type.values)
+        # Define the objective value
+        model.setObjective(
+            expr = obj_coeffs.values.T @ model_vars,
+            sense = GRB.MINIMIZE)
+        # Add constraints
+        model_constrs = model.addMConstr(
+            A.values, model_vars, inequalities['value'].values, rhs.values.reshape(-1)
+            )
+        model_constrs.setAttr('constrname', A.index)
+        model.update()
+        return model
+    
+    
+    @staticmethod
+    def _get_gp_model_from_opt_problem(opt_problem: OptProblem) -> gp.Model:
+        ''' Create a gurobipy model from OptProblem class.
+        '''
+        return GurobipyOptimizer._get_gp_model_from_dataframes(
+            *opt_problem.get_dataframes()
+            )
