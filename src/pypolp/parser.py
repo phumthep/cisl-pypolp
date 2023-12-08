@@ -1,16 +1,12 @@
 from __future__ import annotations
 from collections import namedtuple
 import re
-from typing import TYPE_CHECKING
 
 import gurobipy as gp
 import pandas as pd
 import numpy as np
 
-
-
-if TYPE_CHECKING:
-    from pypolp.problem_class import DWProblem
+from pypolp.problem_class import DWProblem
 
 
 
@@ -38,19 +34,15 @@ def parse_mps(path: str) -> tuple[pd.DataFrame]:
     ineq = model.getAttr('sense')
     constr_names = model.getAttr('ConstrName')
     
+    # Create five dataframes to define an optimization problem
     c_df = pd.DataFrame(obj_coeffs, index=varnames, columns=['value'])
-    
     A_df = pd.DataFrame(model.getA().toarray(), index=constr_names, columns=varnames)
-    
     b_df = pd.DataFrame(b, index=constr_names, columns=['value'])
-    
     inequalities = pd.DataFrame(ineq, index=constr_names, columns=['value'])
-    
     col_df = pd.DataFrame(
         {'type':vtypes, 'lower':lowerbounds, 'upper':upperbounds},
         index = varnames
         )
-    
     return (
         c_df, A_df, b_df, inequalities, col_df)
     
@@ -71,55 +63,43 @@ def add_item(constr_dict, key, value) -> None:
 
 
 def parse_section(line: str) -> int:
-    ''' Return the section ID if this line describes 
-    the block number or the master section.
+    ''' Return the section ID if this line describes the block number or the master section.
     '''
+    # The current section has 'BLOCK XX' as its header
     if line == 'MASTERCONSS':
         return 0
-    
     else:
-        p = r'\d+'
-        num_block = re.search(p, line).group()
-        num_block = int(num_block)
-        return num_block
+        section_pat = r'BLOCK\s(\d+)'
+        section_number = re.fullmatch(section_pat, line)
+        if section_number:
+            return int(section_number.group(1))
+        else:
+            return None
     
 
-def get_row_order(lines: list[str, ...], num_blocks: int) -> pd.DataFrame:
+def get_row_order(lines: list[str, ...]) -> pd.DataFrame:
     ''' Return a dataframe describing constr_name and block_id pairs.
     The rows are sorted in an ascending order by their block_ids.
     '''
-    # Indicator variable of block_id of the current line 'BLOCK XX'
-    flag = False
-    # Block 0 is the master problem.
-    sections = ['BLOCK ' + str(i) for i in range(1, num_blocks+1)]
-    sections.append('MASTERCONSS')
-    
     # Label each line with its section, Block 1, 2, ... or master.
-    cur_section = None
-    constr_dict = {}
-    
+    cur_section_number = None
+    constraint_dict = {}
     for line in lines:
-        line = line.rstrip()
-        
+        line = line.strip()
         # If the current line is the section header, then update the section label.
         # Otherwise, we will label the following lines under the current section.
-        flag = (line in sections)
-        if flag:
-            cur_section = parse_section(line)
+        new_section_number = parse_section(line)
+        if (new_section_number) or (new_section_number == 0):
+            cur_section_number = new_section_number
             
-        # The beginning of a Dec file describes the problem and not the
-        # block memberships. Here, flag is still false.
-        elif (cur_section is not None) and (not flag):
-            add_item(constr_dict, line, cur_section)
-        
-        # The current line does not belong to a block or the master.
-        else:
-            pass
-            # print('\nIrrelevant line:\n', line)
+        # The beginning of a DEC file describes the problem and not the
+        # block memberships. While cur_section is still none,
+        # we do not register these lines as a constraint
+        elif cur_section_number is not None:
+            add_item(constraint_dict, line, cur_section_number)
     
-    row_order = pd.DataFrame(constr_dict, index=['block_id']).transpose()
+    row_order = pd.DataFrame(constraint_dict, index=['block_id']).transpose()
     row_order = row_order.sort_values(by='block_id', ascending=True)
-    
     return row_order
     
 
@@ -129,12 +109,12 @@ def get_col_order(A_df, row_order, col_df) -> pd.DataFrame:
     '''
     df = A_df.join(row_order)
     variables = list(col_df.index)
+    # If a variable is unassigned, then it is left with zero.
+    # Here, we use np.nan when assigning to the master problem
     col_order = pd.DataFrame(0, index=variables, columns=['block_id'])
     
     # For each variable, find constraints (rows) in which it belongs
     for variable in variables:
-    
-        # var_df is a column
         var_df = df.loc[:, [variable, 'block_id']]
         
         mask = np.where(
@@ -154,23 +134,22 @@ def get_col_order(A_df, row_order, col_df) -> pd.DataFrame:
     
     if (col_order.block_id == 0).any():
         print('\nWarning: some variables are unlabeled in the dec file.\n')
-    
+        
     col_order = col_order.sort_values(by='block_id', ascending=True)
-    
     return col_order
 
 
-def get_orders(path, A_df, col_df) -> tuple[pd.DataFrame, pd.DataFrame]:
+def get_orders(path_dec, A_df, col_df) -> tuple[pd.DataFrame, pd.DataFrame]:
     ''' Return row order and column order of the A matrix.
     This is an ascending order.
     '''
     print('\nParsing the DEC file...')
-    with open(path, 'r') as f:
+    with open(path_dec, 'r') as f:
         lines = f.readlines()
     # A DEC file states the number of blocks in the line 
     # after the NBLOCKS line
     num_blocks = int(lines[lines.index('NBLOCKS\n')+1])
-    row_order = get_row_order(lines, num_blocks)
+    row_order = get_row_order(lines)
     col_order = get_col_order(A_df, row_order, col_df)
     return row_order, col_order
 
@@ -225,7 +204,7 @@ def parse_mps_dec(path_mps, path_dec) -> tuple[pd.DataFrame]:
     last_var_idx_in_subp = col_indices[-1].end
     num_total_vars = len(col_df)
     
-    # There is a master-only variable, when the last block stops short from
+    # There is a master-only variable when the last block stops short from
     # covering the rest of the variables.
     if last_var_idx_in_subp != num_total_vars:
         row_indices.append(Index(None, None))
@@ -250,7 +229,7 @@ def get_dataframe_orders(path_dec, A_df, col_df) -> tuple[pd.DataFrame, pd.DataF
     # A DEC file states the number of blocks in the line 
     # after the NBLOCKS line
     num_blocks = int(lines[lines.index('NBLOCKS\n')+1])
-    row_order = get_row_order(lines, num_blocks) 
+    row_order = get_row_order(lines) 
     col_order = get_col_order(A_df, row_order, col_df)
     return row_order, col_order
 
