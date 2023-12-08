@@ -3,10 +3,12 @@ import typing
 
 import pandas as pd
 
+
+
 @dataclass(slots=True)
 class OptProblem:
-    ''' Class representing an optimization problem.
-    User can manually create the dataframes.
+    ''' Class representing an optimization problem. This class is a container
+    for dataframes, which a user can manually create the dataframes.
     '''
     obj_coeffs: pd.DataFrame
     A: pd.DataFrame
@@ -14,13 +16,14 @@ class OptProblem:
     inequalities: pd.DataFrame
     var_info: pd.DataFrame
     
-    def get_dataframes(self) -> tuple[pd.DataFrame, ...]:
+    def get_dataframes(self) -> tuple[pd.DataFrame]:
         return (
             self.obj_coeffs,
             self.A,
             self.rhs,
             self.inequalities,
-            self.var_info)
+            self.var_info
+            )
 
 
 
