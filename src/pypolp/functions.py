@@ -53,4 +53,20 @@ def check_is_binary(
         return (num_non_int == 0, non_int_vars)
     else:
         return num_non_int == 0
-    
+
+
+def generate_convex_names(n_subproblems: int):
+    ''' The name of convexity contrainsts are in the format convex_[block_id].
+    We recover the final solution using this regex pattern.
+    '''
+    return [f'convex_{j}' for j in range(n_subproblems)]
+
+
+def separate_master_vars(master_vars: pd.DataFrame) -> tuple[pd.DataFrame]:
+    ''' Return a dataframe with only master-only variables and a dataframe
+    with weighting variables, respectively.
+    '''
+    master_only_vars = master_vars[~master_vars['variable'].str.contains('B\(', regex=True)]
+    master_only_vars = master_only_vars.set_index('variable')
+    betas = master_vars[master_vars['variable'].str.contains('B\(', regex=True)].copy()
+    return master_only_vars, betas

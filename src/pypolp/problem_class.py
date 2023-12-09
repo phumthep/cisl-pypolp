@@ -31,12 +31,17 @@ class OptProblem:
 class DWProblem(OptProblem):
     ''' Class representing a Dantzig-Wolfe decomposition problem.
     '''
+    # If there are no master-only variables, then the last tuple
+    # in row_indices is (None, None)
     row_indices: typing.Any = None
     col_indices: typing.Any = None
+    
     n_subproblems: int = None
     master_size: int = None
-    
+
     def get_opt_problem(self) -> OptProblem:
+        ''' Return as an OptProblem class.
+        '''
         return OptProblem(
             obj_coeffs = self.obj_coeffs,
             A = self.A,
@@ -44,3 +49,11 @@ class DWProblem(OptProblem):
             inequalities = self.inequalities,
             var_info = self.var_info
             )
+    
+    def check_has_check_master_only_vars(self) -> bool:
+        ''' If there is a master-only variable, then the final member of
+        row_indices is (None, None)
+        '''
+        return (self.row_indices[-1].start is None)
+    
+    

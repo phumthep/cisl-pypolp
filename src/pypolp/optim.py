@@ -179,7 +179,7 @@ class GurobipyOptimizer:
             to_record: bool = None
             ) -> GurobipyOptimizer:
         return cls(
-            model = cls._get_gp_model_from_opt_problem(opt_problem),
+            model = cls.get_gp_model_from_opt_problem(opt_problem),
             warmstart = warmstart,
             mipgap = mipgap,
             verbose = verbose,
@@ -209,7 +209,7 @@ class GurobipyOptimizer:
     
 
     @staticmethod
-    def _get_gp_model_from_dataframes(
+    def get_gp_model_from_dataframes(
             obj_coeffs: pd.DataFrame,
             A: pd.DataFrame,
             rhs: pd.DataFrame,
@@ -241,9 +241,9 @@ class GurobipyOptimizer:
     
     
     @staticmethod
-    def _get_gp_model_from_opt_problem(opt_problem: OptProblem) -> gp.Model:
+    def get_gp_model_from_opt_problem(opt_problem: OptProblem) -> gp.Model:
         ''' Create a gurobipy model from OptProblem class.
         '''
-        return GurobipyOptimizer._get_gp_model_from_dataframes(
+        return GurobipyOptimizer.get_gp_model_from_dataframes(
             *opt_problem.get_dataframes()
             )

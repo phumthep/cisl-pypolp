@@ -25,17 +25,23 @@ class MasterProblem(GurobipyOptimizer):
             verbose: bool,
             ):
         # Inherit methods from GurobipyOptimizer class
+        if not mipgap:
+            mipgap = get_master_mipgap()
+        if not verbose:
+            self.verbose = get_master_verbose()
+            
         super().__init__(
             model = model,
             warmstart = True,
             mipgap = mipgap,
-            verbose = verbose,
+            verbose = self.verbose,
             to_record = True
             )
+        
         if not timelimit:
-            self.model.setParam('timelimit', get_master_timelimit())
-        else:
-            self.model.setParam('timelimit', timelimit)
+            self.timelimit: int = get_master_timelimit()
+        self.model.setParam('timelimit', self.timelimit)
+        
         # Other add-on attributes from GurobipyOptimizers
         self.has_mov: bool = None
         self.phase: int = None
@@ -83,7 +89,7 @@ class MasterProblem(GurobipyOptimizer):
 
     def solve(self) -> Solution:
         if self.verbose:
-            print('\nDW Solve: Master Problem\n')
+            print('\n----- DW Solve: Master Problem\n')
         solution = self.optimize()
 
         if self.model.status == 3: # Infeasible
@@ -185,7 +191,7 @@ class MasterProblem(GurobipyOptimizer):
             [A, A_convex],
             axis=0
             )
-        return cls._get_gp_model_from_dataframes(
+        return cls.get_gp_model_from_dataframes(
             obj_coeffs = obj_coeffs,
             A = A,
             rhs = rhs,
@@ -198,7 +204,9 @@ class MasterProblem(GurobipyOptimizer):
     def fit(
             cls,
             dw_problem: DWProblem,
-            timelimit: int = None
+            mipgap: float = None,
+            timelimit: int = None,
+            verbose: bool = None
             ) -> MasterProblem:
         # When there are no master-only variables, the master problem is empty
         # but with placeholder for constraints.
@@ -210,8 +218,8 @@ class MasterProblem(GurobipyOptimizer):
         
         return cls(
             model = model,
-            mipgap = get_master_mipgap(),
+            mipgap = mipgap,
             timelimit = timelimit,
-            verbose = get_master_verbose(),
+            verbose = verbose,
             )
 

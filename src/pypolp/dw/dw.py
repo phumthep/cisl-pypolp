@@ -1,43 +1,62 @@
-import configparser
-
 import numpy as np
 import pandas as pd
 
+from pypolp.config import (
+    get_dw_max_iter,
+    get_dw_improve,
+    get_dw_optgap,
+    get_dw_recover_integer,
+    get_dw_verbose,
+    get_master_timelimit
+    )
 from pypolp.dw.master import MasterProblem
-from pypolp.dw.record import Record
+from pypolp.dw.record import DWRecord
 from pypolp.dw.subproblems import Subproblems
 from pypolp.problem_class import DWProblem
-from pypolp.tools.functions import get_config
 
 
 
 class DantzigWolfe:
-    def __init__(self, recover_integer=None):
-        config: configparser.ConfigParser = get_config()
-        self.MAXITER: int = int(config['DEFAULT']['MAXITER'])
-        self.DWIMPROVE: float = float(config['DEFAULT']['DWIMPROVE']) # in percentage
-        self.DWOPTGAP: float = float(config['DEFAULT']['DWOPTGAP'])
+    ''' A manager of the Dantzig-Wolfe implementation.
+    '''
+    def __init__(
+            self,
+            max_iter: int = None,
+            dw_improve: float = None,
+            dw_optgap: float = None,
+            recover_integer: bool = None,
+            master_timelimit: int = None,
+            ):
+        self.dw_verbose = get_dw_verbose()
+        # Use parameters from user_conf.ini if not provided
+        if not max_iter:
+            self.MAXITER: int = get_dw_max_iter()
+        if not dw_improve:
+            # in percentage
+            self.DWIMPROVE: float = get_dw_improve()
+        if not dw_optgap:
+            self.DWOPTGAP: float = get_dw_optgap()
 
         # The default is not to recover an integer solution
-        # We recover an integer solution by solving the last iteration of the master problem
-        # as a binary zero or one.
+        # We recover an integer solution by reoptimizing the master problem
+        # with binary weights.
         if not recover_integer:
-            self.RECOVER_INTEGER: bool = config.getboolean('DEFAULT', 'RECOVER_INTEGER')
+            self.RECOVER_INTEGER: bool = get_dw_recover_integer()
         else:
             self.RECOVER_INTEGER: bool = recover_integer
         
         self.subproblems: Subproblems = None
-        self.master_problem: MasterProblem = None
-
-        self.master_size: int = None
         self.n_subproblems: int = None
+        
+        self.master_problem: MasterProblem = None
+        self.master_size: int = None
 
         self.phase: int = 1
         self.dw_iter: int = 0 # The number of DW iterations till termination
         
 
 
-    def fit(self, dw_problem: DWProblem, record: Record) -> None:
+    def fit(self, dw_problem: DWProblem, record: DWRecord) -> None:
         # If there are master-only variables, then the master will contain those.
         # Otherwise, the master is an empty model.
         self.master_size = dw_problem.master_size
@@ -57,16 +76,17 @@ class DantzigWolfe:
         
         
     
-    def solve(self, record: Record) -> None:
+    def solve(self, record: DWRecord) -> None:
         objval_old = np.inf
         total_reduced_cost = -np.inf
         dual_bound = -np.inf
         
         for dw_iter in range(1, self.MAXITER+1):
             # An iteration is counted when the master problem is optimize.
-            print(f'\n\n==== DW ITER {dw_iter} Phase {self.phase} ====')
+            if self.dw_verbose:
+                print(f'\n\n==== DW ITER {dw_iter} Phase {self.phase} ====')
             # Populate the master problem with new columns
-            self.master_problem.add_cols_from(record)
+            self.master_problem.add_cols_from(record.current_PQs)
             _ = self.master_problem.solve()
             
             # Update the parameters
@@ -91,6 +111,8 @@ class DantzigWolfe:
                     percent_improve = round(percent_improve, 3)
                     print(f'\nTerminate DW: Improvement is less than tolerance: {percent_improve} %')
                     break
+                if self.dw_verbose:
+                    print(f'{"DW Solve: Incre. improve:":<25} {round(percent_improve, 4)} %')
                 
                 # 2) If the lower bound improvement is less than threshold
                 reduced_costs = [ck - alpha_k for ck,alpha_k in zip(record.subproblem_objvals, alphas)]
@@ -110,13 +132,15 @@ class DantzigWolfe:
                     dual_bound = objval_new + total_reduced_cost
                 record.add_dual_bound(dual_bound)
                 
-                optgap = abs(dual_bound - objval_new)/(1 + abs(dual_bound)) # Add 1 to prevent division by zero
-                print(f'DW Solve: Optgap: {optgap}') #round(abs(total_reduced_cost/objval_new), 4)
+                # optgap is in percent. Add 0.001 to the denominator to prevent division by zero
+                optgap = abs(dual_bound - objval_new)/(0.001 + abs(dual_bound))*100 
+                if self.dw_verbose:
+                    print(f'{"DW Solve: Optgap:":<25} {round(optgap, 4)} %')
                 # total_reduced_cost is zero at the first iteration
                 if optgap <= self.DWOPTGAP:
                     print(f'\nTerminate DW: Optgap is less than tolerance: {round(optgap*100, 4)} %')
                     break
-                # Reset the subproblem objvals at each iteration
+                # Remove all current objective values from record
                 record.reset_subproblem_objvals()
                 
             if dw_iter == self.MAXITER:
@@ -132,13 +156,14 @@ class DantzigWolfe:
         
     
     def get_solution(
-            self, record: Record,
-            recover_integer: bool = False) -> type[float, pd.DataFrame]:
+            self, record: DWRecord,
+            recover_integer: bool = False
+            ) -> tuple[float, pd.DataFrame]:
         # We need to recover integer solutions
         if self.RECOVER_INTEGER or recover_integer:
             self.master_problem.convert_betas_to_int()
             # Need to set time limit because some instances take forever
-            self.master_problem.model.setParam('TimeLimit', 60*5)
+            self.master_problem.model.setParam('TimeLimit', self.master_timelimit)
             # self.master_problem.model.setParam('OutputFlag',1)
             _ = self.master_problem.solve()
         

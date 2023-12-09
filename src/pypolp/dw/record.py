@@ -5,6 +5,7 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
+from pypolp.config import get_dw_verbose
 from pypolp.optim import Proposal
 from pypolp.problem_class import DWProblem
 
@@ -19,7 +20,7 @@ class ProposalPQ:
 
 
 
-class Record:
+class DWRecord:
     ''' Class to keep track of the proposals. Records only unique proposals.
     
     Example: subproblem_1 yields new solution on dw_ter 1, 3, and 4.
@@ -38,7 +39,10 @@ class Record:
      }
     
     '''
-    def __init__(self):
+    def __init__(self, verbose: bool =None):
+        if not verbose:
+            self.verbose: bool = get_dw_verbose()
+        
         # Keep the proposal objects of each subproblem
         self.proposals: dict[int: list[Proposal, ...]] = None
         
@@ -51,10 +55,10 @@ class Record:
         self.current_PQs: list[ProposalPQ, ...] = None
         
         # Need info to reformulate proposal into Ps and Qs
-        self.cjs: dict[int: list[pd.DataFrame]] = None
-        self.Ajs: dict[int: list[pd.DataFrame]] = None
+        self.cjs: dict[int: list[pd.DataFrame, ...]] = None
+        self.Ajs: dict[int: list[pd.DataFrame, ...]] = None
         self.n_subproblems: int = None
-        self.col_indices: list[typing.NamedTuple[int, int]]
+        self.col_indices: list[typing.NamedTuple[int, int], ...]
         self.varnames: list['str', ...]
         
         # Save the reduced costs to calculate the lower bound of RMP
@@ -98,7 +102,8 @@ class Record:
         
     def _add_pq(self, proposal = Proposal) -> None:
         proposal_pq = self._convert_to_pq(proposal)
-        print(f'DW Solve: Added B({proposal.block_id}, {proposal.dw_iter})')
+        if self.verbose:
+            print(f'DW Solve: Added B({proposal.block_id}, {proposal.dw_iter})')
         self.current_PQs.append(proposal_pq)
         
 
@@ -114,7 +119,8 @@ class Record:
         self.primal_objvals = []
         
         self.cjs = []
-        self.Ajs = []
+        self.Ajs = [] # Coefficients in the master block NOT the subproblem block
+        
         self.n_subproblems = dw_problem.n_subproblems
         self.col_indices = dw_problem.col_indices
         self.varnames = list(dw_problem.A.columns)

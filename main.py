@@ -20,7 +20,7 @@ def main():
     master_time, subproblem_time = dw_instance.get_stats(mode='runtime')
     
     
-    base_opt = GurobipyOptimizer.create(opt_problem, to_log=True)
+    base_opt = GurobipyOptimizer.create(opt_problem)
     true_solution = base_opt.optimize()
     
     print('\n============================================')
