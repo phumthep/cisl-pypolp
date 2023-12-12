@@ -16,6 +16,11 @@ from pypolp.problem_class import OptProblem
 
 
 
+# Suppress messages when setting params
+gp.setParam('OutputFlag', False)
+
+
+
 @dataclass(slots=True)
 class Solution:
     ''' Class containing info on the solution of an optimization problem.

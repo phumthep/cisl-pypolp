@@ -36,15 +36,12 @@ class DantzigWolfe:
             self.DWIMPROVE: float = get_dw_improve()
         if not dw_optgap:
             self.DWOPTGAP: float = get_dw_optgap()
-
         # The default is not to recover an integer solution
         # We recover an integer solution by reoptimizing the master problem
         # with binary weights.
         if not recover_integer:
             self.RECOVER_INTEGER: bool = get_dw_recover_integer()
-        else:
-            self.RECOVER_INTEGER: bool = recover_integer
-        
+
         self.subproblems: Subproblems = None
         self.n_subproblems: int = None
         
@@ -52,7 +49,7 @@ class DantzigWolfe:
         self.master_size: int = None
 
         self.phase: int = 1
-        self.dw_iter: int = 0 # The number of DW iterations till termination
+        self.dw_iter: int = None # Record the final number of iterations
         
 
 
@@ -72,6 +69,8 @@ class DantzigWolfe:
         
         # In the beginning, solve the subproblems using their original
         # cost coefficients
+        if self.dw_verbose:
+            print(f'\n\n==== DW ITER 0 Phase {self.phase} ====')
         self.subproblems.solve(dw_iter=0, record=record)
         
         
@@ -162,8 +161,6 @@ class DantzigWolfe:
         # We need to recover integer solutions
         if self.RECOVER_INTEGER or recover_integer:
             self.master_problem.convert_betas_to_int()
-            # Need to set time limit because some instances take forever
-            self.master_problem.model.setParam('TimeLimit', self.master_timelimit)
             # self.master_problem.model.setParam('OutputFlag',1)
             _ = self.master_problem.solve()
         
