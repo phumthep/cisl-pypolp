@@ -25,11 +25,14 @@ class MasterProblem(GurobipyOptimizer):
             timelimit: int,
             verbose: bool,
             ):
-        # Inherit methods from GurobipyOptimizer class
+        # Use parameters from user_conf.ini if not provided
         if mipgap is None:
             mipgap = get_master_mipgap()
+            
         if verbose is None:
-            self.verbose = get_master_verbose()
+            self.verbose: bool = get_master_verbose()
+        else:
+            self.verbose: bool = verbose
             
         super().__init__(
             model = model,

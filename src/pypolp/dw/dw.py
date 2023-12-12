@@ -26,20 +26,32 @@ class DantzigWolfe:
             dw_optgap: float = None,
             recover_integer: bool = None,
             master_timelimit: int = None,
+            relax_subproblems: bool = None
             ):
-        self.dw_verbose = get_dw_verbose()
+        
+        self.dw_verbose: bool = get_dw_verbose()
+        self.relax_subproblems: bool = relax_subproblems
+        
         # Use parameters from user_conf.ini if not provided
-        if not max_iter:
+        if max_iter is None:
             self.MAXITER: int = get_dw_max_iter()
-        if not dw_improve:
-            # in percentage
+        else:
+            self.MAXITER: int = max_iter
+            
+        if dw_improve is None:
             self.DWIMPROVE: float = get_dw_improve()
-        if not dw_optgap:
+        else:
+            self.DWIMPROVE: float = dw_improve
+            
+        if dw_optgap is None:
             self.DWOPTGAP: float = get_dw_optgap()
+        else:
+            self.DWOPTGAP: float = dw_optgap
+        
         # The default is not to recover an integer solution
         # We recover an integer solution by reoptimizing the master problem
         # with binary weights.
-        if not recover_integer:
+        if recover_integer is None:
             self.RECOVER_INTEGER: bool = get_dw_recover_integer()
 
         self.subproblems: Subproblems = None
@@ -63,7 +75,7 @@ class DantzigWolfe:
         # The master problem will collect proposals from subproblem as the first
         # step inside the following for loop.
         # Note that here is the zero-th iteration.
-        self.subproblems = Subproblems()
+        self.subproblems = Subproblems(to_relax=self.relax_subproblems)
         self.subproblems.fit(dw_problem)
         self.n_subproblems = self.subproblems.n_subproblems
         

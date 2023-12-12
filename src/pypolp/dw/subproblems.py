@@ -43,6 +43,8 @@ class Subproblem(GurobipyOptimizer):
             
         if verbose is None:
             self.verbose = get_subp_verbose()
+        else:
+            self.verbose = verbose
             
         if to_relax is None:
             to_relax = get_subp_relax()
@@ -137,13 +139,21 @@ class Subproblems():
             to_record: bool = None, 
             to_relax: bool = None
             ):
-        self.all_subproblems: list[Subproblem, ...] = None
-        self.n_subproblems: int = None
+        self.to_relax: bool = to_relax
         
+        # Use parameters from user_conf.ini if not provided
         if verbose is None:
             self.verbose: bool = get_subp_verbose()
+        else:
+            self.verbose: bool = verbose
+            
         if to_record is None:
             self.to_record: bool = get_gp_record()
+        else:
+            self.to_record: bool = to_record
+
+        self.all_subproblems: list[Subproblem, ...] = None
+        self.n_subproblems: int = None
         
         # Track the statistics of each subproblem
         self.runtimes: dict[int, list[float, ...]] = None
@@ -162,7 +172,6 @@ class Subproblems():
             mipgap: float = None,
             verbose: bool = None,
             to_record: bool = None,
-            to_relax: bool = None
             ) -> None:
         ''' Chop the constraint matrix and create subproblems
         '''
@@ -189,7 +198,7 @@ class Subproblems():
                 warmstart = warmstart,
                 mipgap = mipgap,
                 verbose = verbose,
-                to_relax = to_relax
+                to_relax = self.to_relax
                 )
 
             # Record block specific information
