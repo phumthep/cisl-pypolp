@@ -11,6 +11,7 @@ from pypolp.config import (
     get_gp_mipgap,
     get_gp_record,
     get_gp_verbose,
+    get_dw_verbose
     )
 from pypolp.problem_class import OptProblem
 
@@ -75,31 +76,37 @@ class GurobipyOptimizer:
             mipgap: float,
             verbose: bool,
             to_record: bool,
+            to_relax: bool,
             ):
         self.status_map = {2: 'optimal', 3: 'infeasible', 5:'unbounded', 9:'time_limit'}
         self.model: gp.Model = model
         
         # Default to Gurobi parameters in user_config.ini
-        if not warmstart:
+        if warmstart is None:
             self.model.setParam('LPWarmStart', get_gp_warmstart())
         else:
             self.model.setParam('LPWarmStart', warmstart)
             
-        if not mipgap:
+        if mipgap is None:
             self.model.setParam('mipgap', get_gp_mipgap())
         else:
             self.model.setParam('mipgap', mipgap)
         
-        if not verbose:
+        if verbose is None:
             self.model.setParam('outputflag', get_gp_verbose())
         else:
             self.model.setParam('outputflag', verbose)
             
         # If want to record gurobi statistics
-        if not to_record:
+        if to_record is None:
             self.to_record = get_gp_record()
         else:
             self.to_record = to_record
+            
+        # Relax the problem to linear program
+        if to_relax and get_dw_verbose():
+            print(f'DW Solve: Relax {self.model.modelname} to a linear program.')
+            self.model.relax()
             
         # Need to compute additional information when a model is 
         # infeasible to get the Farkas ray
@@ -181,14 +188,16 @@ class GurobipyOptimizer:
             warmstart: bool = None,
             mipgap: float = None,
             verbose: bool = None,
-            to_record: bool = None
+            to_record: bool = None,
+            to_relax: bool = None
             ) -> GurobipyOptimizer:
         return cls(
             model = cls.get_gp_model_from_opt_problem(opt_problem),
             warmstart = warmstart,
             mipgap = mipgap,
             verbose = verbose,
-            to_record = to_record
+            to_record = to_record,
+            to_relax = to_relax
             )
     
     
@@ -199,7 +208,8 @@ class GurobipyOptimizer:
             warmstart: bool = None,
             mipgap: float = None,
             verbose: bool = None,
-            to_record: bool = None
+            to_record: bool = None,
+            to_relax: bool = None
             ) -> GurobipyOptimizer:
         ''' Create a GurobipyOptimizer from a file instead of
         getting from dataframes.
@@ -209,7 +219,8 @@ class GurobipyOptimizer:
             warmstart = warmstart,
             mipgap = mipgap,
             verbose = verbose,
-            to_record = to_record
+            to_record = to_record,
+            to_relax = to_relax
             )
     
 
@@ -219,11 +230,12 @@ class GurobipyOptimizer:
             A: pd.DataFrame,
             rhs: pd.DataFrame,
             inequalities: pd.DataFrame,
-            var_info: pd.DataFrame
+            var_info: pd.DataFrame,
+            model_name: str = None
             ) -> gp.Model:
         ''' Create a gurobipy model from a set of five dataframes.
         '''
-        model = gp.Model()
+        model = gp.Model(f'{model_name}')
         # Define variables
         model_vars = model.addMVar(
             shape = var_info.shape[0], 

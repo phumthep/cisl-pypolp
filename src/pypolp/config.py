@@ -85,6 +85,13 @@ def get_subp_mipgap() -> bool:
     return CONFIG.getfloat('DWSUBPROBLEM', 'MIPGAP')
 
 
+def get_subp_relax() -> bool:
+    ''' Specify whether to convert the subproblems to linear programs 
+    by relaxing the integer variables.
+    '''
+    return CONFIG.getboolean('DWSUBPROBLEM', 'RELAX')
+
+
 
 #---- Gurobi
 def get_gp_warmstart() -> bool:

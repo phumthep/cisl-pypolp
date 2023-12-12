@@ -7,7 +7,8 @@ import pandas as pd
 from pypolp.config import (
     get_master_timelimit,
     get_master_verbose,
-    get_master_mipgap
+    get_master_mipgap,
+    get_gp_record
     )
 from pypolp.dw.record import ProposalPQ
 from pypolp.functions import generate_convex_names
@@ -25,9 +26,9 @@ class MasterProblem(GurobipyOptimizer):
             verbose: bool,
             ):
         # Inherit methods from GurobipyOptimizer class
-        if not mipgap:
+        if mipgap is None:
             mipgap = get_master_mipgap()
-        if not verbose:
+        if verbose is None:
             self.verbose = get_master_verbose()
             
         super().__init__(
@@ -35,10 +36,11 @@ class MasterProblem(GurobipyOptimizer):
             warmstart = True,
             mipgap = mipgap,
             verbose = self.verbose,
-            to_record = True
+            to_record = get_gp_record,
+            to_relax = False
             )
         
-        if not timelimit:
+        if timelimit is None:
             self.timelimit: int = get_master_timelimit()
         self.model.setParam('timelimit', self.timelimit)
         
@@ -156,7 +158,7 @@ class MasterProblem(GurobipyOptimizer):
         '''
         rhs, inequality = cls._get_rhs_inequality_dataframes(dw_problem)
         
-        model = gp.Model()
+        model = gp.Model('master')
         model.addConstrs(0==0 for _ in range(dw_problem.n_subproblems))
         model.setAttr('rhs', model.getConstrs(), rhs)
         model.setAttr('sense', model.getConstrs(), inequality)
@@ -196,7 +198,8 @@ class MasterProblem(GurobipyOptimizer):
             A = A,
             rhs = rhs,
             inequalities = inequality,
-            var_info = var_info
+            var_info = var_info,
+            model_name = 'master'
             )
     
     
