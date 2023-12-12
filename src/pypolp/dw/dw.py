@@ -201,7 +201,7 @@ class DantzigWolfe:
             final_solution, 
             index = record.varnames[:master_size])
         
-        final_solution.index = final_solution.index.rename('variable')
+        final_solution.index = final_solution.index.rename('name')
         final_solution.columns = ['value']
         
         final_solution = pd.concat([final_solution, master_only_vars], axis=0)
