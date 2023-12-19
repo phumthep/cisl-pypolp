@@ -120,7 +120,7 @@ class DantzigWolfe:
                 percent_improve = abs((objval_new - objval_old)) / (0.0001 + objval_new) * 100
                 objval_old = objval_new
                 if percent_improve <= self.DWIMPROVE:
-                    print(f'\nTerminate DW: Improvement is less than tolerance: {round(percent_improve, 3)} %')
+                    print(f'\nTerminate DW: Improvement is less than tolerance: {round(percent_improve, 4)} %')
                     break
                 if self.dw_verbose:
                     print(f'{"DW Solve: Incre. improve:":<25} {round(percent_improve, 4)} %')
@@ -146,7 +146,7 @@ class DantzigWolfe:
                 # optgap is in percent. Add 0.0001 to the denominator to prevent division by zero
                 optgap = abs(dual_bound - objval_new)/(0.0001 + abs(dual_bound))*100 
                 if self.dw_verbose:
-                    print(f'{"DW Solve: Optgap:":<25} {round(optgap, 4)} %')
+                    print(f'{"DW Solve: Optgap:":<25} {round(optgap*100, 4)} %')
                 # total_reduced_cost is zero at the first iteration
                 if optgap <= self.DWOPTGAP:
                     print(f'\nTerminate DW: Optgap is less than tolerance: {round(optgap*100, 4)} %')

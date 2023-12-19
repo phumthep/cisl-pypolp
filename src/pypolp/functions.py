@@ -54,7 +54,7 @@ def check_is_binary_from_model(
         target_varnames: list[str],
         atol: float = 1e-5,
         return_non_binary: bool = False
-        ) -> bool:
+        ) -> bool | pd.DataFrame:
     ''' Check if target variables are binary. Return non-binary
     variables otherwise.
     '''
