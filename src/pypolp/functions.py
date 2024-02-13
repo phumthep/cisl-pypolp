@@ -13,14 +13,13 @@ def get_pypolp_dir() -> str:
 
 
 def get_temp_dir() -> str:
-    return os.path.join(get_pypolp_dir(), 'temp')
+    return os.path.join(get_pypolp_dir(), 'temp',)
 
 
-def check_is_binary_from_df(
+def get_non_binary_from_df(
         df: pd.DataFrame,
         target_varnames: list[str],
         atol: float = 1e-5,
-        return_non_binary: bool = False
         ) -> bool:
     ''' Return true if all target variables are binary.
     '''
@@ -39,28 +38,26 @@ def check_is_binary_from_df(
                    ] = 1
     
     # Values that are not exactly 0 or 1 are non-binary values
-    non_int_vars = target_variables[target_variables['value'] > 0]
-    non_int_vars = non_int_vars[non_int_vars['value'] < 1]
-    num_non_int = len(non_int_vars)
-    
-    if return_non_binary:
-        return (num_non_int == 0, non_int_vars)
-    else:
-        return num_non_int == 0
+    non_bin_vars = target_variables[target_variables['value'] > 0]
+    non_bin_vars = non_bin_vars[non_bin_vars['value'] < 1]
+
+    return non_bin_vars
 
 
-def check_is_binary_from_model(
+
+def get_non_binary_from_model(
         model: gp.Model,
         target_varnames: list[str],
         atol: float = 1e-5,
-        return_non_binary: bool = False
-        ) -> bool | pd.DataFrame:
+        ) -> pd.DataFrame:
     ''' Check if target variables are binary. Return non-binary
     variables otherwise.
     '''
-    variables = model.getVars()
     filtered_vars = {}
-    for v in variables:
+    for v in model.getVars():
+        # Match with the variable types in target_varnames
+        # The full variable name is in the format 'variable[node, time]'
+        # or just 'variable[time]
         if v.varname.split('[')[0] in target_varnames:
             filtered_vars[v.varname] = v.X
 
@@ -78,14 +75,10 @@ def check_is_binary_from_model(
                    ] = 1
     
     # Values that are not exactly 0 or 1 are non-binary values
-    non_int_vars = target_variables[target_variables['value'] > 0]
-    non_int_vars = non_int_vars[non_int_vars['value'] < 1]
-    num_non_int = len(non_int_vars)
+    non_bin_vars = target_variables[target_variables['value'] > 0]
+    non_bin_vars = non_bin_vars[non_bin_vars['value'] < 1]
     
-    if return_non_binary:
-        return (num_non_int == 0, non_int_vars)
-    else:
-        return num_non_int == 0
+    return non_bin_vars
     
 
 
