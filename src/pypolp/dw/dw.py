@@ -121,8 +121,6 @@ class DantzigWolfe:
                 if percent_improve <= self.DWIMPROVE:
                     print(f'\nTerminate DW: Improvement is less than tolerance: {round(percent_improve, 4)} %')
                     break
-                if self.dw_verbose:
-                    print(f'{"DW Solve: Incre. improve:":<25} {round(percent_improve, 4)} %')
                 
                 # 2) If the lower bound improvement is less than threshold
                 reduced_costs = [ck - alpha_k for ck,alpha_k in zip(record.subproblem_objvals, alphas)]
@@ -144,14 +142,16 @@ class DantzigWolfe:
                 
                 # rmpgap is in percent. Add 0.0001 to the denominator to prevent division by zero
                 rmpgap = abs(dual_bound - objval_new)/(0.0001 + abs(dual_bound))*100 
-                if self.dw_verbose:
-                    print(f'{"DW Solve: RMPGap:":<25} {round(rmpgap, 4)} %')
                 # total_reduced_cost is zero at the first iteration
                 if rmpgap <= self.RMPGAP:
                     print(f'\nTerminate DW: RMPGap is less than tolerance: {round(rmpgap, 4)} %')
                     break
                 # Remove all current objective values from record
                 record.reset_subproblem_objvals()
+                
+                if self.dw_verbose:
+                    print(f'{"DW Solve: Incre. improve:":<25} {round(percent_improve, 4)} %')
+                    print(f'{"DW Solve: RMPGap:":<25} {round(rmpgap, 4)} %')
                 
             if dw_iter == self.MAXITER:
                 print(f'\nTerminate DW: Reached max iteration: {self.MAXITER}')
