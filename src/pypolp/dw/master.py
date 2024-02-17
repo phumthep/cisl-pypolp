@@ -117,7 +117,7 @@ class MasterProblem(GurobipyOptimizer):
         return solution
     
     
-    def convert_betas_to_int(self) -> None:
+    def convert_betas_to_binary(self) -> None:
         ''' Change the beta variables to integer and re-optimize.
         '''
         for gp_var in self.model.getVars():

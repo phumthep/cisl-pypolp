@@ -214,7 +214,7 @@ class DantzigWolfe:
         return objval, final_solution
     
 
-    def reoptimize_binary_weights(self) -> None:
+    def reoptimize_with_binary_weights(self) -> None:
         ''' After we have generated extreme points/rays, 
          we might reoptimize the weights as binary variables.
          If the subproblems produce integer solutions, then
