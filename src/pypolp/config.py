@@ -28,11 +28,11 @@ def get_dw_improve() -> float:
     return CONFIG.getfloat('DW', 'DWIMPROVE')
 
 
-def get_dw_optgap() -> float:
-    ''' Terminate DW when the gap between primal and dual bounds
-    are below a threshold.
+def get_dw_rmpgap() -> float:
+    ''' Terminate DW when the gap between the current objval of the RMP
+    and the current lower bound is larger than a threshold.
     '''
-    return CONFIG.getfloat('DW', 'DWOPTGAP')
+    return CONFIG.getfloat('DW', 'DWRMPGAP')
 
 
 def get_dw_recover_integer() -> bool:

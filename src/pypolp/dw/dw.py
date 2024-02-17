@@ -4,7 +4,7 @@ import pandas as pd
 from pypolp.config import (
     get_dw_max_iter,
     get_dw_improve,
-    get_dw_optgap,
+    get_dw_rmpgap,
     get_dw_recover_integer,
     get_dw_verbose,
     get_master_timelimit
@@ -23,7 +23,7 @@ class DantzigWolfe:
             self,
             max_iter: int = None,
             dw_improve: float = None,
-            dw_optgap: float = None,
+            dw_rmpgap: float = None,
             recover_integer: bool = None,
             master_timelimit: int = None,
             relax_subproblems: bool = None
@@ -43,10 +43,10 @@ class DantzigWolfe:
         else:
             self.DWIMPROVE: float = dw_improve
             
-        if dw_optgap is None:
-            self.DWOPTGAP: float = get_dw_optgap()
+        if dw_rmpgap is None:
+            self.RMPGAP: float = get_dw_rmpgap()
         else:
-            self.DWOPTGAP: float = dw_optgap
+            self.RMPGAP: float = dw_rmpgap
         
         # The default is not to recover an integer solution
         # We recover an integer solution by reoptimizing the master problem
@@ -84,7 +84,6 @@ class DantzigWolfe:
         if self.dw_verbose:
             print(f'\n\n==== DW ITER 0 Phase {self.phase} ====')
         self.subproblems.solve(dw_iter=0, record=record)
-        
         
     
     def solve(self, record: DWRecord) -> None:
@@ -143,13 +142,13 @@ class DantzigWolfe:
                     dual_bound = objval_new + total_reduced_cost
                 record.add_dual_bound(dual_bound)
                 
-                # optgap is in percent. Add 0.0001 to the denominator to prevent division by zero
-                optgap = abs(dual_bound - objval_new)/(0.0001 + abs(dual_bound))*100 
+                # rmpgap is in percent. Add 0.0001 to the denominator to prevent division by zero
+                rmpgap = abs(dual_bound - objval_new)/(0.0001 + abs(dual_bound))*100 
                 if self.dw_verbose:
-                    print(f'{"DW Solve: Optgap:":<25} {round(optgap*100, 4)} %')
+                    print(f'{"DW Solve: RMPGap:":<25} {round(rmpgap, 4)} %')
                 # total_reduced_cost is zero at the first iteration
-                if optgap <= self.DWOPTGAP:
-                    print(f'\nTerminate DW: Optgap is less than tolerance: {round(optgap*100, 4)} %')
+                if rmpgap <= self.RMPGAP:
+                    print(f'\nTerminate DW: RMPGap is less than tolerance: {round(rmpgap, 4)} %')
                     break
                 # Remove all current objective values from record
                 record.reset_subproblem_objvals()
@@ -168,14 +167,8 @@ class DantzigWolfe:
     
     def get_solution(
             self, record: DWRecord,
-            recover_integer: bool = False
             ) -> tuple[float, pd.DataFrame]:
-        # We need to recover integer solutions
-        if self.RECOVER_INTEGER or recover_integer:
-            self.master_problem.convert_betas_to_int()
-            # self.master_problem.model.setParam('OutputFlag',1)
-            _ = self.master_problem.solve()
-        
+
         # Get X from the master problem
         master_vars = self.master_problem.get_X()
         objval = self.master_problem.objval
@@ -205,7 +198,7 @@ class DantzigWolfe:
         temp_x = betas.groupby('j').agg({'weighted_X': 'sum'}).values.flatten()
     
         final_solution = []
-        for j, x in enumerate(temp_x):
+        for _, x in enumerate(temp_x):
             final_solution.extend(x)
         
         master_size = len(final_solution)
@@ -219,6 +212,17 @@ class DantzigWolfe:
         final_solution = pd.concat([final_solution, master_only_vars], axis=0)
             
         return objval, final_solution
+    
+
+    def reoptimize_binary_weights(self) -> None:
+        ''' After we have generated extreme points/rays, 
+         we might reoptimize the weights as binary variables.
+         If the subproblems produce integer solutions, then
+         the master problem will produce an integer solution.
+         Of course, the solution is likely suboptimal.
+        '''
+        self.master_problem.convert_betas_to_binary()
+        _ = self.master_problem.solve()
     
     
     def get_runtimes_dict(self) -> dict[int|str: list[float]]:

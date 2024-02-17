@@ -16,7 +16,6 @@ from pypolp.optim import GurobipyOptimizer, Solution
 from pypolp.problem_class import DWProblem
 
 
-
 class MasterProblem(GurobipyOptimizer):
     def __init__(
             self,
