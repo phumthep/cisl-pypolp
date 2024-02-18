@@ -62,7 +62,10 @@ class DantzigWolfe:
 
         self.phase: int = 1
         self.dw_iter: int = None # Record the final number of iterations
-        
+
+        self.solve_as_binary: bool = False # Update to true when we solve as binary
+        self.rmpgap: float = None # The gap between RMP and its dual
+        self.incre_improve: float = None # incremental improvement of the DW algorithm
 
 
     def fit(self, dw_problem: DWProblem, record: DWRecord) -> None:
@@ -116,10 +119,10 @@ class DantzigWolfe:
                 if objval_new == 0:
                     objval_new += 1e-6
                 # Add 0.0001 to the denominator to prevent division by zero
-                percent_improve = abs((objval_new - objval_old)) / (0.0001 + objval_new) * 100
+                percent_incre_improve = abs((objval_new - objval_old)) / (0.0001 + objval_new) * 100
                 objval_old = objval_new
-                if percent_improve <= self.DWIMPROVE:
-                    print(f'\nTerminate DW: Improvement is less than tolerance: {round(percent_improve, 4)} %')
+                if percent_incre_improve <= self.DWIMPROVE:
+                    print(f'\nTerminate DW: Improvement is less than tolerance: {round(percent_incre_improve, 4)} %')
                     break
                 
                 # 2) If the lower bound improvement is less than threshold
@@ -150,7 +153,7 @@ class DantzigWolfe:
                 record.reset_subproblem_objvals()
                 
                 if self.dw_verbose:
-                    print(f'{"DW Solve: Incre. improve:":<25} {round(percent_improve, 4)} %')
+                    print(f'{"DW Solve: Incre. improve:":<25} {round(percent_incre_improve, 4)} %')
                     print(f'{"DW Solve: RMPGap:":<25} {round(rmpgap, 4)} %')
                 
             if dw_iter == self.MAXITER:
@@ -161,8 +164,11 @@ class DantzigWolfe:
         if not self.phase == 2:
             raise ValueError('DantzigWolfe has not entered phase II.')
         
-        # Record the total iterations required
+        # Record the statistics
         self.dw_iter = dw_iter
+        if not self.solve_as_binary:
+            self.rmpgap = rmpgap
+            self.incre_improve = percent_incre_improve
         
     
     def get_solution(
@@ -221,6 +227,7 @@ class DantzigWolfe:
          the master problem will produce an integer solution.
          Of course, the solution is likely suboptimal.
         '''
+        self.solve_as_binary = True
         self.master_problem.convert_betas_to_binary()
         _ = self.master_problem.solve()
     
