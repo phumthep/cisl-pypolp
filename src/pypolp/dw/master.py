@@ -126,12 +126,15 @@ class MasterProblem(GurobipyOptimizer):
         self.model.update()
 
     
-    def set_betas_to_one(self, betas: list[str]) -> None:
-        ''' Set the beta variables to 1.
-        '''
-        for beta in betas:
-            self.model.getVarByName(beta).setAttr('lb', 1)
-            self.model.getVarByName(beta).setAttr('ub', 1)
+    def set_betas_to_one(self, max_betas: list[str]) -> None:
+        """Set the beta variables to 1."""
+        for gp_var in self.model.getVars():
+            gp_var.setAttr("VType", GRB.INTEGER)
+            varname = gp_var.varname
+            if varname.startswith("B("):
+                if (varname in max_betas) and (gp_var.X > 0.8):
+                    gp_var.setAttr("lb", 1)
+                    gp_var.setAttr("ub", 1)
         self.model.update()
                 
     

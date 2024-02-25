@@ -251,15 +251,9 @@ class DantzigWolfe:
         betas = self._get_betas(master_vars, master_only_var_idx)
         max_beta_idx = betas.groupby('j')['value'].idxmax()
         # Set all the variables to one
-        max_beta_names = betas.loc[max_beta_idx.values, 'variable']
+        max_beta_names = betas.loc[max_beta_idx.values, 'variable'].to_list()
         self.master_problem.set_betas_to_one(max_beta_names)
         _ = self.master_problem.solve()
-
-
-
-
-        # Reoptimize so we can check for feasibility and
-        # recover the integer solution
     
     
     def get_runtimes_dict(self) -> dict[int|str: list[float]]:
