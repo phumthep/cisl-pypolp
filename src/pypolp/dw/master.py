@@ -123,6 +123,16 @@ class MasterProblem(GurobipyOptimizer):
         for gp_var in self.model.getVars():
             if gp_var.varname.startswith('B('):
                 gp_var.setAttr('VType', GRB.INTEGER)
+        self.model.update()
+
+    
+    def set_betas_to_one(self, betas: list[str]) -> None:
+        ''' Set the beta variables to 1.
+        '''
+        for beta in betas:
+            self.model.getVarByName(beta).setAttr('lb', 1)
+            self.model.getVarByName(beta).setAttr('ub', 1)
+        self.model.update()
                 
     
     @staticmethod

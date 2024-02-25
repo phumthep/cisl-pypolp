@@ -169,15 +169,12 @@ class DantzigWolfe:
         if not self.solve_as_binary:
             self.rmpgap = rmpgap
             self.incre_improve = percent_incre_improve
-        
-    
-    def get_solution(
-            self, record: DWRecord,
-            ) -> tuple[float, pd.DataFrame]:
 
+
+    def _get_master_vars(self) -> tuple[pd.DataFrame, pd.DataFrame, pd.Series]:
+        ''' Return the master variables, master only variables, and the index of master only variables.'''
         # Get X from the master problem
         master_vars = self.master_problem.get_X()
-        objval = self.master_problem.objval
         
         master_only_var_idx = ~master_vars['variable'].str.contains('B\(', regex=True)
         if master_only_var_idx.sum() == 0:
@@ -185,13 +182,25 @@ class DantzigWolfe:
         else:
             master_only_vars = master_vars[master_only_var_idx]
             master_only_vars = master_only_vars.set_index('variable')
-        
-        betas = master_vars[~master_only_var_idx].copy()
+        return master_vars, master_only_vars, master_only_var_idx
+
     
+    def _get_betas(self, master_vars:pd.DataFrame, master_only_var_idx: pd.Series) -> pd.DataFrame:
+        ''' Return the betas from the master problem.'''
+        betas = master_vars[~master_only_var_idx].copy()
         # Label each row of beta with its subproblem_id and iteration_id
         p = r'B\((?P<j>\d+),(?P<i>\d+)\)'
         betas[['j', 'i']] = betas['variable'].str.extract(p)
         betas = betas.astype({'j':int, 'i':int})
+        return betas
+
+
+    def get_solution(
+            self, record: DWRecord,
+            ) -> tuple[float, pd.DataFrame]:
+        ''' Return the final solution and its objective value.'''
+        master_vars, master_only_vars, master_only_var_idx = self._get_master_vars()
+        betas = self._get_betas(master_vars, master_only_var_idx)
     
         # For each beta, extract the corresponding solution X from the record
         betas['X'] = betas.apply(
@@ -214,9 +223,9 @@ class DantzigWolfe:
         
         final_solution.index = final_solution.index.rename('name')
         final_solution.columns = ['value']
-        
         final_solution = pd.concat([final_solution, master_only_vars], axis=0)
-            
+
+        objval = self.master_problem.objval
         return objval, final_solution
     
 
@@ -230,6 +239,27 @@ class DantzigWolfe:
         self.solve_as_binary = True
         self.master_problem.convert_betas_to_binary()
         _ = self.master_problem.solve()
+
+    
+    def reoptimize_with_rounded_weights(self) -> None:
+        ''' Round the largest betas from each subproblem to one.
+        This can quickly produce an integer solution.
+        '''
+        # Find the largest beta from each subproblem
+        # and round it to one
+        master_vars, _, master_only_var_idx = self._get_master_vars()
+        betas = self._get_betas(master_vars, master_only_var_idx)
+        max_beta_idx = betas.groupby('j')['value'].idxmax()
+        # Set all the variables to one
+        max_beta_names = betas.loc[max_beta_idx.values, 'variable']
+        self.master_problem.set_betas_to_one(max_beta_names)
+        _ = self.master_problem.solve()
+
+
+
+
+        # Reoptimize so we can check for feasibility and
+        # recover the integer solution
     
     
     def get_runtimes_dict(self) -> dict[int|str: list[float]]:
