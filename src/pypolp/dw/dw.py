@@ -34,6 +34,9 @@ class DantzigWolfe:
         self.relax_subproblems: bool = relax_subproblems
         self.num_threads: int = num_threads
 
+        # Control whether to solve the subproblems in parallel
+        self.to_parallel: bool = True
+
         # Use parameters from user_conf.ini if not provided
         if max_iter is None:
             self.MAXITER: int = get_dw_max_iter()
@@ -75,7 +78,7 @@ class DantzigWolfe:
         self.master_size = dw_problem.master_size
         self.master_problem = MasterProblem.fit(
             dw_problem, num_threads=self.num_threads
-            )
+        )
 
         # We construct the master problem using proposals from the subproblems.
         # The master problem will collect proposals from subproblem as the first
@@ -91,7 +94,11 @@ class DantzigWolfe:
         # cost coefficients
         if self.dw_verbose:
             print(f'\n\n==== DW ITER 0 Phase {self.phase} ====')
-        self.subproblems.solve(dw_iter=0, record=record)
+
+        if self.to_parallel:
+            self.subproblems.parallel_solve(dw_iter=0, record=record)
+        else:
+            self.subproblems.solve(dw_iter=0, record=record)
 
     def solve(self, record: DWRecord) -> None:
         objval_old = np.inf
@@ -168,7 +175,17 @@ class DantzigWolfe:
 
             if dw_iter == self.MAXITER:
                 print(f'\nTerminate DW: Reached max iteration: {self.MAXITER}')
-            self.subproblems.update_solve(self.phase, dw_iter, lambs, record)
+
+            if self.to_parallel:
+                self.subproblems.parallel_update_solve(
+                    dw_phase=self.phase,
+                    dw_iter=dw_iter,
+                    lambs=lambs,
+                    record=record
+                )
+            else:
+                self.subproblems.update_solve(
+                    self.phase, dw_iter, lambs, record)
 
         # Produce an error if we have not reached Phase 2 after reaching the max iteration.
         if not self.phase == 2:
