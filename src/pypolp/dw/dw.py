@@ -28,6 +28,7 @@ class DantzigWolfe:
             master_timelimit: int = None,
             relax_subproblems: bool = None,
             num_threads: int = None
+            to_parallel: bool = False
     ):
 
         self.dw_verbose: bool = get_dw_verbose()
@@ -35,7 +36,7 @@ class DantzigWolfe:
         self.num_threads: int = num_threads
 
         # Control whether to solve the subproblems in parallel
-        self.to_parallel: bool = True
+        self.to_parallel = to_parallel
 
         # Use parameters from user_conf.ini if not provided
         if max_iter is None:
