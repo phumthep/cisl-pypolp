@@ -27,7 +27,7 @@ class DantzigWolfe:
             recover_integer: bool = None,
             master_timelimit: int = None,
             relax_subproblems: bool = None,
-            num_threads: int = None
+            num_threads: int = None,
             to_parallel: bool = False
     ):
 
