@@ -13,6 +13,8 @@ from pypolp.dw.master import MasterProblem
 from pypolp.dw.record import DWRecord
 from pypolp.dw.subproblems import Subproblems
 from pypolp.problem_class import DWProblem
+import multiprocessing as mp
+from multiprocessing import shared_memory
 
 
 class DantzigWolfe:
@@ -27,13 +29,15 @@ class DantzigWolfe:
             recover_integer: bool = None,
             master_timelimit: int = None,
             relax_subproblems: bool = None,
-            num_threads: int = None
-            to_parallel: bool = False
+            num_threads: int = None,
+            to_parallel: bool = False,
+            num_processes : int = 1
     ):
 
         self.dw_verbose: bool = get_dw_verbose()
         self.relax_subproblems: bool = relax_subproblems
         self.num_threads: int = num_threads
+        self.num_processes : int = num_processes
 
         # Control whether to solve the subproblems in parallel
         self.to_parallel = to_parallel
@@ -90,14 +94,13 @@ class DantzigWolfe:
         )
         self.subproblems.fit(dw_problem)
         self.n_subproblems = self.subproblems.n_subproblems
-
         # In the beginning, solve the subproblems using their original
         # cost coefficients
         if self.dw_verbose:
             print(f'\n\n==== DW ITER 0 Phase {self.phase} ====')
 
         if self.to_parallel:
-            self.subproblems.parallel_solve(dw_iter=0, record=record)
+            self.subproblems.parallel_solve(dw_iter=0, record=record, lambs_shape=(self.master_size, 1), procs=self.num_processes)
         else:
             self.subproblems.solve(dw_iter=0, record=record)
 
@@ -105,7 +108,6 @@ class DantzigWolfe:
         objval_old = np.inf
         total_reduced_cost = -np.inf
         dual_bound = -np.inf
-
         for dw_iter in range(1, self.MAXITER+1):
             # An iteration is counted when the master problem is optimize.
             if self.dw_verbose:
@@ -135,6 +137,9 @@ class DantzigWolfe:
                     (objval_new - objval_old)) / (0.0001 + objval_new) * 100
                 objval_old = objval_new
                 if percent_incre_improve <= self.DWIMPROVE:
+                    if self.to_parallel:
+                        self.subproblems.parallel_update_worker_status(True, self.phase, lambs)
+                        self.subproblems.parallel_process_clean_up()
                     print(
                         f'\nTerminate DW: Improvement is less than tolerance: {round(percent_incre_improve, 4)} %')
                     break
@@ -150,6 +155,9 @@ class DantzigWolfe:
                 if total_reduced_cost != new_total_reduced_cost:
                     total_reduced_cost = new_total_reduced_cost
                 else:
+                    if self.to_parallel:
+                        self.subproblems.parallel_update_worker_status(True, self.phase, lambs)
+                        self.subproblems.parallel_process_clean_up()
                     print('\nTerminate DW: No new proposal from subproblems')
                     break
 
@@ -163,6 +171,9 @@ class DantzigWolfe:
                     (0.0001 + abs(dual_bound))*100
                 # total_reduced_cost is zero at the first iteration
                 if rmpgap <= self.RMPGAP:
+                    if self.to_parallel:
+                        self.subproblems.parallel_update_worker_status(True, self.phase, lambs)
+                        self.subproblems.parallel_process_clean_up()
                     print(
                         f'\nTerminate DW: RMPGap is less than tolerance: {round(rmpgap, 4)} %')
                     break
@@ -178,6 +189,11 @@ class DantzigWolfe:
                 print(f'\nTerminate DW: Reached max iteration: {self.MAXITER}')
 
             if self.to_parallel:
+                self.subproblems.parallel_update_worker_status(
+                    terminate=False, 
+                    dw_phase=self.phase,
+                    lambs=lambs
+                )
                 self.subproblems.parallel_update_solve(
                     dw_phase=self.phase,
                     dw_iter=dw_iter,

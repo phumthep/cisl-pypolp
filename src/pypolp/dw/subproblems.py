@@ -1,6 +1,8 @@
 from __future__ import annotations
 from collections import defaultdict
+import math
 import multiprocessing as mp
+from multiprocessing import shared_memory
 from gurobipy import GRB
 import gurobipy as gp
 import numpy as np
@@ -21,6 +23,149 @@ from pypolp.problem_class import DWProblem
 
 
 # -------------- Section break
+
+def _parallel_omp_solve(block_ids, problem_tuples, A_masters, shared_input_tuple, comm_queue, barrier):
+    '''
+    initiates a single worker process that sets up the models for the given problem parameters and
+    iteratively optimizes the model until the main process specifies termination through the shared input.
+
+    The worker process initializes its own shared memories for each subproblem to efficiently send solutions
+    over to the main process. An alternative could be through the provided communication queue but repeatedly 
+    pickling large or complex numpy data is unefficient. The queue is used to share the names of the created shared
+    memories so the main process can find the appropriate solutions for each subproblem.
+    '''
+    with gp.Env() as env:
+        # Extract the shared inputs (data coming from parent process)
+        shared_input_name : str = shared_input_tuple[0]
+        lambs_shape : tuple = shared_input_tuple[1]
+        # the first 4 bytes (in shared input) is a boolean (whether to terminate iterating)
+        # the next 4 bytes belong to the integer dw_phase
+        # the remaining bytes belong to lambs
+        shared_input = shared_memory.SharedMemory(name = shared_input_name, create=False)
+        flags = np.ndarray(shape=(2,), dtype=np.int32, buffer=shared_input.buf[0:8])
+        lambs = np.ndarray(lambs_shape, dtype=np.float64, buffer=shared_input.buf[8:])
+
+        # the list of shared memory segments created by this process, the parent process is responsible for unlinking/disposing.
+        shared_memory_objects : list[shared_memory.SharedMemory]= []
+
+        # the local data necessary for each update iteration
+        models = []
+        model_obj_coeffs = []
+        Xbuffers : list[np.array] = [] # one array contains the model soluion (model.x)
+        metrics : list[np.array] = [] # one array contains: solution_size, objval, is_ray, runtime, itercount
+
+        def update_solutions(index:int, X:np.array, objval:float, is_ray:bool, runtime:float, itercount:float):
+            '''
+            instead of creating a solution object and returning the tuple(runtime, itercount, solution),
+            this loads all of the above data into the shared memory segment (which will be read by the parent process)
+            '''
+            metric = metrics[index]
+            metric[1] = objval
+            metric[2] = is_ray
+            metric[3] = runtime
+            metric[4] = itercount
+            Xbuffers[index][:] = X
+            return
+
+        for i, problem_tuple in enumerate(problem_tuples):
+            model = gp.Model(env = env)
+            model.setParam('outputflag', get_subp_verbose())
+            # Extract the problem_tuple
+            obj_coeffs, A, rhs, inequalities, var_info, model_name = problem_tuple
+            model_obj_coeffs.append(obj_coeffs)
+            # Add variables to the model
+            x = model.addMVar(
+                shape=var_info.shape[0],
+                name=var_info.index
+            )
+            x.setAttr('lb', var_info.lower.values)
+            x.setAttr('ub', var_info.upper.values)
+            x.setAttr('vtype', var_info.type.values)
+
+            # Define the objective value
+            model.setObjective(
+                expr=obj_coeffs.values.T @ x,
+                sense=GRB.MINIMIZE)
+
+            # Add constraints
+            model_constrs = model.addMConstr(
+                A.values, x, inequalities['value'].values, rhs.values.reshape(
+                    -1)
+            )
+            model_constrs.setAttr('constrname', A.index)
+
+            # After optimize, check if the optimization is bounded or unbounded
+            model.optimize()
+
+            if model.Status == 2:
+                is_ray = False
+            elif model.Status == 5:
+                is_ray = True
+            else:
+                raise ValueError(f'Unsupported status: {model.Status}')
+        
+            X = np.array(model.x)
+            solution_size = np.prod(X.shape) # 8 bytes per float 
+            objval=model.objval
+            runtime = model.Runtime
+            itercount = model.IterCount
+            # 5 additional values (solution size, objval, is_ray, runtime, itercount)
+            shared_mem = shared_memory.SharedMemory(create=True, size= 8 * solution_size + 40)
+            shared_memory_objects.append(shared_mem)
+            metric = np.ndarray(shape=(5,), dtype=np.float64, buffer=shared_mem.buf[:40]) # first 40 bytes
+            metric[0] = solution_size # this remains the same per subproblem throughout all iterations
+            metrics.append(metric)
+            Xbuffer = np.ndarray(shape = X.shape, dtype=np.float64, buffer=shared_mem.buf[40:]) # remaining bytes
+            Xbuffers.append(Xbuffer)
+            update_solutions(i, X, objval, is_ray, runtime, itercount)
+            models.append(model)
+
+        # communicate the shared memory segments (blocking communication)
+        # this could be avoided if we can guarantee uniqueness of names like "subproblem0", "subproblem1" for shared memory blocks
+        for index, shared_mem in enumerate(shared_memory_objects):
+            block_id = block_ids[index]
+            comm_queue.put((block_id, shared_mem.name))
+
+        while True:
+            # iteration 1 and onwards
+            barrier.wait()  # all processes wait for main process to decide whether to terminate
+            terminate = flags[0]
+            if terminate:
+                break 
+            dw_phase = flags[1]
+
+            for index, model in enumerate(models):
+                x = np.array(model.getVars())
+                if dw_phase == 1:
+                    new_c = np.matmul(lambs.T, A_masters[index].values)
+                    new_c = new_c.flatten()
+                    model.setObjective(
+                        expr=new_c @ x,
+                        sense=GRB.MINIMIZE)
+                else:
+                    obj_coeffs = model_obj_coeffs[index]
+                    new_c = obj_coeffs.values.T - \
+                        np.matmul(lambs.T, A_masters[index].values)
+                    new_c = new_c.flatten()
+                    model.setObjective(
+                        expr=new_c @ x,
+                        sense=GRB.MINIMIZE)
+                model.update()
+                model.optimize()
+                if model.Status == 2:
+                    is_ray = False
+                elif model.Status == 5:
+                    is_ray = True
+                else:
+                    raise ValueError(f'Unsupported status: {model.Status}')
+                X = np.array(model.x)
+                objval = model.objval
+                runtime = model.Runtime
+                itercount = model.IterCount
+                update_solutions(index, X, objval, is_ray, runtime, itercount)
+            barrier.wait() # all processes come to this point, then main process reads solutions
+
+
 def _build_and_solve(problem_tuple):
     with gp.Env() as env, gp.Model(env=env) as model:
         # Change this to subproblem.fit
@@ -305,9 +450,17 @@ class Subproblems():
         self.problem_tuples: list[tuple[pd.DataFrame, pd.DataFrame,
                                         pd.DataFrame, pd.DataFrame, pd.DataFrame, str]] = None
 
-        # Store original parameters to update_sole subproblems
+        # Store original parameters to update_solve subproblems
         self.original_c: list[pd.DataFrame, ...] = None
         self.original_A_master: list[pd.DataFrame, ...] = None
+
+        # Store the subprocesses and synchronization structures used in parallel implementations (parallel_solve, parallel_update_solve)
+        self.worker_processes : list[mp.Process] = None
+        self.worker_comm_queue : mp.Queue = None
+        self.worker_shared_input : shared_memory.SharedMemory = None
+        self.worker_shared_memories : list[shared_memory.SharedMemory] = None
+        self.worker_barrier : mp.Barrier = None
+
 
     def _record_opt_stats(self, block_id: int, runtime: int, itercount: float) -> None:
         self.runtimes[block_id].append(runtime)
@@ -350,6 +503,7 @@ class Subproblems():
             )
             self.problem_tuples.append(problem_tuple)
 
+            # TODO: remove this, already included in problem_tuple
             # Create original_c for parallel update_solve
             self.original_c.append(
                 dw_problem.obj_coeffs.iloc[col_id.start: col_id.end]
@@ -428,7 +582,6 @@ class Subproblems():
             if self.to_record:
                 self._record_opt_stats(
                     block_id, subproblem.runtime, subproblem.itercount)
-
             record.update(
                 Proposal.from_solution(
                     solution,
@@ -437,21 +590,45 @@ class Subproblems():
                 )
             )
 
-    def parallel_solve(self, dw_iter, record: DWRecord) -> None:
+    def parallel_solve(self, dw_iter, record: DWRecord, lambs_shape, procs) -> None:
         ''' This method is used to create subproblems in parallel.
         '''
+        problems_per_proc = math.ceil(self.n_subproblems / procs) # could distribute a bit more evenly
+        self.worker_comm_queue = mp.Queue()
+        self.worker_barrier = mp.Barrier(parties = procs + 1) # includes worker and main process
+        self.worker_processes = []
+        self.worker_shared_memories = [None] * self.n_subproblems
+        lambs_arr_bytes = np.prod(lambs_shape, dtype=np.int32) * np.dtype(np.float64).itemsize
+        self.worker_shared_input = shared_memory.SharedMemory(create = True, size = 8 + lambs_arr_bytes)
+        shared_input_data = (self.worker_shared_input.name, lambs_shape)
+        for i in range(procs):
+            low = i * problems_per_proc
+            high = (i + 1) * problems_per_proc # exclusive
+            block_ids = [id for id in range(low, high)]
+            problem_tuples = self.problem_tuples[low:high]
+            A_masters = self.original_A_master[low:high]
+            process = mp.Process(target=_parallel_omp_solve, 
+                                 args=(block_ids, problem_tuples, A_masters, shared_input_data, self.worker_comm_queue, self.worker_barrier))
+            self.worker_processes.append(process)
+            process.start()  # start the processes
+        
+        # get the shared memories allocated by each subprocess (a single process may send multiple)
+        # read the solution and update records/stats
+        for _ in range(self.n_subproblems):
+            (block_id, shared_memory_name) = self.worker_comm_queue.get()
+            shm = shared_memory.SharedMemory(name = shared_memory_name)
+            self.worker_shared_memories[block_id] = shm
 
-        # Optimize the models in parallel
-        with mp.Pool() as pool:
-            temp_list = pool.map(
-                _build_and_solve, self.problem_tuples)
-
-        # Update self.runtimes and self.itercounts
-        for block_id, (runtime, itercount, solution) in enumerate(temp_list):
-            self._record_opt_stats(
-                block_id, runtime, itercount)
-            # Proposal object is a solution object with additional attributes:
-            # the DW iteration number and the subproblem ID
+        for block_id in range(self.n_subproblems):
+            shm = self.worker_shared_memories[block_id]
+            metric = np.ndarray(shape=(5,), dtype=np.float64, buffer=shm.buf[:40])
+            X_size = int(metric[0])
+            X = np.ndarray(shape = (X_size,), dtype=np.float64, buffer=shm.buf[40:])
+            solution = Solution(X = np.copy(X), objval=metric[1], is_ray=bool(metric[2]))
+            # saving metrics
+            if self.to_record:
+                self._record_opt_stats(
+                    block_id, runtime = metric[3], itercount=metric[4])
             record.update(
                 Proposal.from_solution(
                     solution,
@@ -459,6 +636,54 @@ class Subproblems():
                     block_id
                 )
             )
+
+        # PREVIOUS IMPLEMENTATION
+        # Optimize the models in parallel
+        # with mp.Pool() as pool:
+        #     temp_list = pool.map(
+        #         _build_and_solve, self.problem_tuples)
+
+        # # Update self.runtimes and self.itercounts
+        # for block_id, (runtime, itercount, solution) in enumerate(temp_list):
+        #     self._record_opt_stats(
+        #         block_id, runtime, itercount)
+        #     # Proposal object is a solution object with additional attributes:
+        #     # the DW iteration number and the subproblem ID
+        #     record.update(
+        #         Proposal.from_solution(
+        #             solution,
+        #             dw_iter,
+        #             block_id
+        #         )
+        #     )
+
+    def parallel_update_worker_status(self, terminate:bool, dw_phase:int, lambs:np.array) -> None:
+        '''
+        update shared_input and then let all processes read the updated information.
+        Based on the updated parameters, the processes adjust their models or quit iterating.
+        '''
+        flags = np.ndarray(shape=(2,1), dtype=np.int32, buffer=self.worker_shared_input.buf[:8])
+        flags[0] = terminate
+        if not terminate:
+            flags[1] = dw_phase
+            shared_lambs = np.ndarray(shape = lambs.shape, dtype=np.float64, buffer=self.worker_shared_input.buf[8:])
+            shared_lambs[:] = lambs
+        # all workers now proceeds to the start of an iteration (they will quit if terminate is true)
+        self.worker_barrier.wait()
+        return
+
+
+    def parallel_process_clean_up(self) -> None:
+        '''
+        all processes come to an end and we clean up allocated shared memories
+        '''
+        for process in self.worker_processes:
+            process.join()
+        for shm in self.worker_shared_memories:
+            shm.unlink()
+        self.worker_shared_input.unlink()
+        return
+
 
     def parallel_update_solve(
             self,
@@ -467,30 +692,22 @@ class Subproblems():
             lambs: np.array,
             record: DWRecord
     ) -> None:
-        # Optimize the models in parallel
-        # Create a list of tuples to pass to starmap
-        combined_list = list(
-            zip(
-                self.problem_tuples,
-                self.original_A_master,
-                [dw_phase]*self.n_subproblems,
-                [lambs] * self.n_subproblems
-            )
-        )
-
-        with mp.Pool() as pool:
-            temp_list = pool.starmap(_update_and_solve, combined_list)
-
-        # Update self.runtimes and self.itercounts
-        for block_id, (runtime, itercount, solution) in enumerate(temp_list):
-
-            # Assume that the objvals are returned in order by the subproblem ID
+        
+        self.worker_barrier.wait() # wait for all workers to finish an iteration
+        # check solutions
+        for block_id in range(self.n_subproblems):
+            shm = self.worker_shared_memories[block_id] # get the shared memory for i-th subproblem to read solution
+            metric = np.ndarray(shape=(5,), dtype=np.float64, buffer=shm.buf[:40])
+            X_size = int(metric[0])
+            X = np.ndarray(shape = (X_size,), dtype=np.float64, buffer=shm.buf[40:])
+            solution = Solution(X = np.copy(X), objval=metric[1], is_ray=bool(metric[2]))
+            # saving metrics
+            if self.verbose:
+                print(f'\n----- DW Solve: Subproblem {block_id}\n')
             record.add_subproblem_objval(solution.objval)
-
-            self._record_opt_stats(
-                block_id, runtime, itercount)
-            # Proposal object is a solution object with additional attributes:
-            # the DW iteration number and the subproblem ID
+            if self.to_record:
+                self._record_opt_stats(
+                    block_id, runtime = metric[3], itercount=metric[4])
             record.update(
                 Proposal.from_solution(
                     solution,
@@ -498,3 +715,36 @@ class Subproblems():
                     block_id
                 )
             )
+
+        # PREVIOUS IMPLEMENTATION
+        # Optimize the models in parallel
+        # Create a list of tuples to pass to starmap
+        # combined_list = list(
+        #     zip(
+        #         self.problem_tuples,
+        #         self.original_A_master,
+        #         [dw_phase]*self.n_subproblems,
+        #         [lambs] * self.n_subproblems
+        #     )
+        # )
+        # with mp.Pool() as pool:
+        #     temp_list = pool.starmap(_update_and_solve, combined_list)
+
+        # # Update self.runtimes and self.itercounts
+        # for block_id, (runtime, itercount, solution) in enumerate(temp_list):
+
+        #     # Assume that the objvals are returned in order by the subproblem ID
+        #     record.add_subproblem_objval(solution.objval)
+
+        #     self._record_opt_stats(
+        #         block_id, runtime, itercount)
+        #     # Proposal object is a solution object with additional attributes:
+        #     # the DW iteration number and the subproblem ID
+        #     record.update(
+        #         Proposal.from_solution(
+        #             solution,
+        #             dw_iter,
+        #             block_id
+        #         )
+        #     )
+        return

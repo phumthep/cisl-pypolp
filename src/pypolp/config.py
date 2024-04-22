@@ -4,7 +4,7 @@ import os
 from pypolp.functions import get_pypolp_dir
 
 
-config_file = os.path.join(get_pypolp_dir(), 'user_config.ini')
+config_file = 'user_config.ini'
 CONFIG = configparser.ConfigParser()
 CONFIG.read(config_file)
 
