@@ -117,7 +117,7 @@ def _parallel_omp_solve(
             itercount = model.IterCount
             # 5 additional values (solution size, objval, is_ray, runtime, itercount)
             shared_mem = shared_memory.SharedMemory(
-                create=True, size=8 * solution_size + 40
+                create=True, size=int(8 * solution_size + 40)
             )
             shared_memory_objects.append(shared_mem)
             metric = np.ndarray(
@@ -571,7 +571,7 @@ class Subproblems:
             np.prod(lambs_shape, dtype=np.int32) * np.dtype(np.float64).itemsize
         )
         self.worker_shared_input = shared_memory.SharedMemory(
-            create=True, size=8 + lambs_arr_bytes
+            create=True, size=int(8 + lambs_arr_bytes)
         )
         shared_input_data = (self.worker_shared_input.name, lambs_shape)
         for i in range(procs):
