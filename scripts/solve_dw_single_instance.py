@@ -58,7 +58,7 @@ timer_parse_dec = (dt.datetime.now() - timer_parse_dec).total_seconds()
 
 # Create instances to solve with Gurobi
 mip_problem = dw_problem.get_opt_problem()
-
+.
 
 # %% Solving with DW
 print("\n=== Running experiment: Solve MIP with DW ===\n")
@@ -70,7 +70,11 @@ record.fit(dw_problem)
 
 # Create an instance of the Dantzig-Wolfe algorithm
 dw_model = DantzigWolfe(
-    dw_improve=DW_IMPROVE, dw_rmpgap=RMPGAP, num_threads=NUM_THREADS
+    dw_improve=DW_IMPROVE,
+    dw_rmpgap=RMPGAP,
+    num_threads=NUM_THREADS,
+    to_parallel=True,
+    num_processes=2,
 )
 dw_model.fit(dw_problem, record)
 dw_model.solve(record)

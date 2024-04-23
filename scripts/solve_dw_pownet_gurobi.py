@@ -29,11 +29,8 @@ def calculate_set_mipgap(rounding_objval: float, true_objval: float) -> float:
 
 
 def run_dw_experiment(
-    nprocs: int,
     model_name: str,
     T_simulate: int,
-    set_rmpgap: float,
-    set_dwimprove: float,
 ) -> None:
     # Start time
     timer_script = datetime.now()
@@ -57,9 +54,7 @@ def run_dw_experiment(
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
 
-    session_name = (
-        f"{ctime}_{model_name}_{T_simulate}_{set_rmpgap}_{set_dwimprove}_{nprocs}"
-    )
+    session_name = f"{ctime}_{model_name}_{T_simulate}"
 
     # Extract row/column orders to parse the DW structure
     instance_folder = os.path.join(
@@ -74,28 +69,15 @@ def run_dw_experiment(
 
     # Collect statistics to compare computational performance
     FIELDS = [
-        "nprocs",
         "model_name",
         "T_simulate",
-        "set_rmpgap",
-        "set_dwimprove",
-        "master_itercount",
-        "master_time",
-        "subp_itercount",
-        "subp_time",
-        "dw_itercount",
-        "dw_total_time",
-        "dw_objval",
-        "dw_rmpgap",
-        "dw_improve",
         "lp_gurobi_time",
         "lp_objval",
-        "wall_clock_dw",
         "wall_clock_lp_gurobi",
     ]
 
     # Create a csv file with only headers. We will append to this csv later.
-    csv_name = os.path.join(output_dir, f"{session_name}_dwstats.csv")
+    csv_name = os.path.join(output_dir, f"{session_name}_gurobi.csv")
     with open(csv_name, "w", newline="", encoding="utf-8") as csvfile:
         # creating a csv writer object
         csvwriter = csv.writer(csvfile)
@@ -109,36 +91,9 @@ def run_dw_experiment(
         print(f"\n\nDW-PowNet: === Solving step {k} ===")
         path_mps = os.path.join(instance_folder, f"{model_name}_{k}.mps")
 
-        # ----- Solve with Dantzig-Wolfe
-        timer_dw = datetime.now()
-        dw_problem = parse_mps_with_orders(path_mps, row_order, col_order)
-        record = DWRecord()
-        record.fit(dw_problem)
-
-        dw_model = DantzigWolfe(
-            dw_rmpgap=set_rmpgap,
-            dw_improve=set_dwimprove,
-            num_threads=num_threads,  # Gurobi uses one thread in parallel mode
-            to_parallel=True,
-            num_processes=nprocs,
-        )
-
-        dw_model.fit(dw_problem, record)
-        dw_model.solve(record)
-
-        master_time, subp_time = dw_model.get_stats("runtime")
-        master_itercount, subp_itercount = dw_model.get_stats("itercount")
-        dw_rmpgap = dw_model.rmpgap
-        dw_improve = dw_model.incre_improve
-
-        timer_dw = (datetime.now() - timer_dw).total_seconds()
-
-        dw_objval, _ = dw_model.get_solution(record)
-        dw_itercount = dw_model.dw_iter
-
         # ----- Solve as LP with Gurobi
 
-        timer_mip = datetime.now()
+        timer_lp = datetime.now()
 
         lp_model = gp.read(path_mps)
         lp_model.relax()
@@ -148,7 +103,7 @@ def run_dw_experiment(
         lp_objval = lp_model.objval
         lp_gurobi_time = lp_model.runtime
 
-        timer_mip = (datetime.now() - timer_mip).total_seconds()
+        timer_lp = (datetime.now() - timer_lp).total_seconds()
 
         # ----- Saving intermediate results
         with open(csv_name, "a", newline="", encoding="utf-8") as csvfile:
@@ -157,24 +112,11 @@ def run_dw_experiment(
             # writing the data rows
             csvwriter.writerow(
                 [
-                    nprocs,
                     model_name,
                     T_simulate,
-                    set_rmpgap,
-                    set_dwimprove,
-                    master_itercount,
-                    master_time,
-                    subp_itercount,
-                    subp_time,
-                    dw_itercount,
-                    master_time + subp_time,  # dw_total_time
-                    dw_objval,
-                    dw_rmpgap,
-                    dw_improve,
                     lp_gurobi_time,
                     lp_objval,
-                    timer_dw,
-                    timer_mip,
+                    timer_lp,
                 ]
             )
 
@@ -186,15 +128,8 @@ def run_dw_experiment(
 if __name__ == "__main__":
     model_name = "thailand"
     T_simulate = 24  # The length of each simulation horizon
-    set_rmpgap = 1
-    set_dwimprove = 1
-    nprocs_list = [1, 4, 8, 16, 32, 64]
 
-    for nproc in nprocs_list:
-        run_dw_experiment(
-            nprocs=nproc,
-            model_name=model_name,
-            T_simulate=T_simulate,
-            set_rmpgap=set_rmpgap,
-            set_dwimprove=set_dwimprove,
-        )
+    run_dw_experiment(
+        model_name=model_name,
+        T_simulate=T_simulate,
+    )
