@@ -69,8 +69,9 @@ record = DWRecord()
 record.fit(dw_problem)
 
 # Create an instance of the Dantzig-Wolfe algorithm
-dw_model = DantzigWolfe(dw_improve=DW_IMPROVE,
-                        dw_rmpgap=RMPGAP, num_threads=NUM_THREADS)
+dw_model = DantzigWolfe(
+    dw_improve=DW_IMPROVE, dw_rmpgap=RMPGAP, num_threads=NUM_THREADS
+)
 dw_model.fit(dw_problem, record)
 dw_model.solve(record)
 
@@ -137,8 +138,7 @@ if SAVE_RESULT:
     solutions = solutions.join(lp_solution, how="left")
 
     solutions.to_csv(
-        os.path.join(get_temp_dir(),
-                     f"{c_time}_{MODEL_NAME}_dw_compare_solutions.csv")
+        os.path.join(get_temp_dir(), f"{c_time}_{MODEL_NAME}_dw_compare_solutions.csv")
     )
 
 
@@ -165,8 +165,7 @@ plt.legend()
 # plt.legend(['Dantzig-Wolfe', 'Normal Opt'])
 if SAVE_FIGURE:
     plt.savefig(
-        os.path.join(get_temp_dir(),
-                     f"{c_time}_{MODEL_NAME}_dw_objval_converge.png"),
+        os.path.join(get_temp_dir(), f"{c_time}_{MODEL_NAME}_dw_objval_converge.png"),
         dpi=350,
     )
 
@@ -179,8 +178,7 @@ print(f'{"MIP objval:":<20} {int(mip_objval)}')
 print(f'{"DWLP objval:":<20} {int(dw_objval_lp)}')
 print(f'{"LP objval:":<20} {int(lp_objval)}')
 
-mip_dwmip_gap = round(
-    abs((mip_objval - dw_objval_mip) / mip_objval + 0.01) * 100, 2)
+mip_dwmip_gap = round(abs((mip_objval - dw_objval_mip) / mip_objval + 0.01) * 100, 2)
 print(f'{"MIP-DWMIP gap (%):":<20} {mip_dwmip_gap}')
 print(f'{"RMPGap (%):":<20} {round(dw_model.rmpgap, 2)}')
 print(f'{"Incre.Improve (%):":<20} {round(dw_model.incre_improve, 2)}')
