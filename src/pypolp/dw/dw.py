@@ -261,6 +261,13 @@ class DantzigWolfe:
         runtimes['master'] = self.master_problem.runtimes
         return runtimes
     
+    def get_total_runtime(self) -> float:
+        total_runtime = 0
+        for runtimes in self.subproblems.runtimes.values():
+            total_runtime += sum(runtimes)
+        total_runtime += sum(self.master_problem.runtimes)
+        return total_runtime
+    
 
     def get_itercounts_dict(self) -> dict[int|str: list[float]]:
         itercounts = self.subproblems.itercounts
